@@ -178,17 +178,6 @@ async function fetchAV(fn, params, apiKey) {
   return json;
 }
 
-function extractQuote(json) {
-  if (!json || json.__error) return null;
-  const q = json["Global Quote"] || json["Global Quote "];
-  if (!q || !q["05. price"]) return null;
-  return {
-    price: q["05. price"],
-    changePercent: q["10. change percent"],
-    asOf: q["07. latest trading day"],
-  };
-}
-
 function trimTimeSeries(json, maxPoints = 14) {
   const seriesKey = Object.keys(json || {}).find((k) => k.toLowerCase().includes("time series"));
   if (!seriesKey) return json;
@@ -281,27 +270,84 @@ const INDICES_TTL_MS = 6 * 60 * 60 * 1000; // 6h — daily-close data doesn't ne
 const NEWS_TTL_MS = 20 * 60 * 1000; // 20m — free to refresh (no Alpha Vantage cost)
 const YAHOO_NEWS_RSS_URL = "https://finance.yahoo.com/news/rssindex";
 
-async function fetchIndexProxy(proxy, avKey) {
-  const json = await fetchAV("TIME_SERIES_DAILY", { symbol: proxy.symbol, outputsize: "compact" }, avKey);
-  const series = json["Time Series (Daily)"];
-  if (!series) return { ...proxy, error: json.__error || "No data returned." };
+// Alpha Vantage rate-limits by the calling Worker's shared egress IP, not the
+// API key — so no key (shared or personal) can unblock it from Cloudflare.
+// Yahoo Finance's public chart endpoint has no such issue (same as the news
+// feed below), so index prices are sourced from there instead.
+async function fetchIndexProxy(proxy) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(proxy.symbol)}?range=1mo&interval=1d`;
+  let json;
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!res.ok) return { ...proxy, error: `Yahoo Finance error (${res.status}).` };
+    json = await res.json();
+  } catch (err) {
+    return { ...proxy, error: err.message || "Network error." };
+  }
 
-  const dates = Object.keys(series).sort(); // oldest -> newest
-  const recent = dates.slice(-15);
-  const points = recent.map((d) => ({ date: d, close: parseFloat(series[d]["4. close"]) }));
+  const result = json?.chart?.result?.[0];
+  if (!result) return { ...proxy, error: json?.chart?.error?.description || "No data returned." };
+
+  const timestamps = result.timestamp || [];
+  const closes = result.indicators?.quote?.[0]?.close || [];
+  const points = timestamps
+    .map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: closes[i] }))
+    .filter((p) => p.close != null)
+    .slice(-15);
   const latest = points[points.length - 1];
   const prev = points[points.length - 2];
   const changePercent = latest && prev ? ((latest.close - prev.close) / prev.close) * 100 : null;
 
-  return { ...proxy, price: latest ? latest.close : null, changePercent, asOf: latest ? latest.date : null, points };
+  return {
+    ...proxy,
+    price: latest ? latest.close : result.meta?.regularMarketPrice ?? null,
+    changePercent,
+    asOf: latest ? latest.date : null,
+    points,
+  };
 }
 
-async function fetchIndices(avKey) {
+async function fetchIndices() {
   const indices = [];
   for (const proxy of INDEX_PROXIES) {
-    indices.push(await fetchIndexProxy(proxy, avKey));
+    indices.push(await fetchIndexProxy(proxy));
   }
   return { indices, updatedAt: Date.now() };
+}
+
+// Single-ticker live price for paper trading, sourced from Yahoo Finance for
+// the same reason as fetchIndexProxy above — Alpha Vantage is unreachable
+// from the Worker's shared egress IP.
+async function fetchYahooQuote(ticker) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=5d&interval=1d`;
+  let json;
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!res.ok) return null;
+    json = await res.json();
+  } catch {
+    return null;
+  }
+
+  const result = json?.chart?.result?.[0];
+  if (!result) return null;
+
+  const timestamps = result.timestamp || [];
+  const closes = result.indicators?.quote?.[0]?.close || [];
+  const points = timestamps
+    .map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: closes[i] }))
+    .filter((p) => p.close != null);
+  const latest = points[points.length - 1];
+  const prev = points[points.length - 2];
+  const price = latest ? latest.close : result.meta?.regularMarketPrice;
+  if (price == null) return null;
+  const changePercent = latest && prev ? ((latest.close - prev.close) / prev.close) * 100 : null;
+
+  return {
+    price: String(price),
+    changePercent: changePercent != null ? `${changePercent.toFixed(4)}%` : null,
+    asOf: latest ? latest.date : null,
+  };
 }
 
 function xmlDecode(s) {
@@ -369,8 +415,8 @@ function indicesAreCacheable(data) {
   return Array.isArray(data.indices) && data.indices.some((i) => !i.error);
 }
 
-async function getIndices(env, avKey) {
-  return getCached(env, "market:indices", INDICES_TTL_MS, () => fetchIndices(avKey), indicesAreCacheable);
+async function getIndices(env) {
+  return getCached(env, "market:indices", INDICES_TTL_MS, () => fetchIndices(), indicesAreCacheable);
 }
 
 async function getNews(env) {
@@ -529,8 +575,8 @@ async function runWatchCheck(env) {
   const uniqueTickers = [...new Set(watches.map((w) => w.ticker))];
   const quotes = {};
   for (const ticker of uniqueTickers) {
-    const q = extractQuote(await fetchAV("GLOBAL_QUOTE", { symbol: ticker }, env.ALPHAVANTAGE_API_KEY));
-    if (!q) break; // most likely rate-limited — stop spending the remaining daily budget
+    const q = await fetchYahooQuote(ticker);
+    if (!q) continue;
     quotes[ticker] = q;
   }
 
@@ -608,8 +654,7 @@ export default {
       try {
         const marketData = await gatherMarketData(ticker, avKey);
         if (marketData.globalQuote && marketData.globalQuote.__error) {
-          const whoseLimit = ownAvKey ? "your personal key's" : "the shared group key's";
-          return errorResponse(429, `Market-data feed error: ${marketData.globalQuote.__error}. This usually means ${whoseLimit} free-tier daily limit (25 calls/day) has been hit — try again tomorrow, or use your own key in Settings.`, headers);
+          return errorResponse(429, `Market-data feed error: ${marketData.globalQuote.__error}. Alpha Vantage's free tier rate-limits by the server's shared network address, not the API key — a personal key in Settings won't fix this endpoint. Try again later.`, headers);
         }
         const dashboard = await callClaude(ticker, marketData, env.ANTHROPIC_API_KEY);
         return jsonResponse(200, dashboard, headers);
@@ -619,24 +664,20 @@ export default {
     }
 
     if (path === "/quote") {
-      if (!avKey) {
-        return errorResponse(500, "Server is missing ALPHAVANTAGE_API_KEY.", headers);
-      }
       const ticker = String(payload.ticker || "").trim().toUpperCase();
       if (!isValidTicker(ticker)) {
         return errorResponse(400, "Enter a valid ticker symbol, e.g. NVDA.", headers);
       }
-      const q = extractQuote(await fetchAV("GLOBAL_QUOTE", { symbol: ticker }, avKey));
+      const q = await fetchYahooQuote(ticker);
       if (!q) {
-        const whoseLimit = ownAvKey ? "your personal key's" : "the shared group key's";
-        return errorResponse(429, `Market-data feed error — likely ${whoseLimit} Alpha Vantage daily limit (25 calls/day). Try again later.`, headers);
+        return errorResponse(429, "Couldn't fetch a live price for that ticker right now. Try again shortly.", headers);
       }
       return jsonResponse(200, { ticker, ...q }, headers);
     }
 
     if (path === "/market") {
       try {
-        const [indices, news] = await Promise.all([getIndices(env, avKey), getNews(env)]);
+        const [indices, news] = await Promise.all([getIndices(env), getNews(env)]);
         return jsonResponse(200, { indices: indices.indices, indicesUpdatedAt: indices.updatedAt, news: news.items, newsUpdatedAt: news.updatedAt }, headers);
       } catch (err) {
         return errorResponse(500, err.message || "Couldn't load market data.", headers);
@@ -695,7 +736,7 @@ export default {
 
   async scheduled(event, env, ctx) {
     ctx.waitUntil(runWatchCheck(env));
-    ctx.waitUntil(getCached(env, "market:indices", 0, () => fetchIndices(env.ALPHAVANTAGE_API_KEY), indicesAreCacheable).catch(() => {}));
+    ctx.waitUntil(getCached(env, "market:indices", 0, () => fetchIndices(), indicesAreCacheable).catch(() => {}));
     ctx.waitUntil(getCached(env, "market:news", 0, fetchNews).catch(() => {}));
   },
 };
