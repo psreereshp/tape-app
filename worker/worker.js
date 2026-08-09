@@ -2,7 +2,7 @@
 //
 // Secrets/vars to set in the Worker's Settings > Variables and Secrets
 // (never put these in this file):
-//   ANTHROPIC_API_KEY     — secret — your Anthropic API key
+//   GEMINI_API_KEY         — secret — your free Google Gemini API key (aistudio.google.com)
 //   APP_KEY                — secret — a shared token the frontend sends, so this
 //                             endpoint isn't wide open to anyone on the internet
 //   VAPID_PRIVATE_KEY      — secret — see VAPID_KEYS_PRIVATE.txt / README
@@ -20,8 +20,7 @@
 // Paste this whole file into Cloudflare's Workers "Quick edit" editor —
 // no build step, no npm, no wrangler required.
 
-const ANTHROPIC_MODEL = "claude-sonnet-5";
-const ANTHROPIC_VERSION = "2023-06-01";
+const GEMINI_MODEL = "gemini-3.6-flash";
 const TICKER_RE = /^[A-Z.\-]{1,10}$/;
 
 const DASHBOARD_TOOL = {
@@ -308,40 +307,69 @@ async function gatherMarketData(ticker) {
   };
 }
 
-async function callClaude(ticker, marketData, anthropicKey) {
+// Gemini's function-parameter schema is OpenAPI 3.0-flavored: no `type` arrays
+// for nullability, use `nullable: true` alongside a single `type` instead.
+function toGeminiSchema(node) {
+  if (Array.isArray(node)) return node.map(toGeminiSchema);
+  if (node && typeof node === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(node)) {
+      if (k === "type" && Array.isArray(v)) {
+        out.type = v.find((t) => t !== "null");
+        if (v.includes("null")) out.nullable = true;
+      } else {
+        out[k] = toGeminiSchema(v);
+      }
+    }
+    return out;
+  }
+  return node;
+}
+
+async function callGemini(ticker, marketData, geminiKey) {
   const body = {
-    model: ANTHROPIC_MODEL,
-    max_tokens: 4096,
-    system: SYSTEM_PROMPT,
-    tools: [DASHBOARD_TOOL],
-    tool_choice: { type: "tool", name: "render_dashboard" },
-    messages: [
+    system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    tools: [
+      {
+        function_declarations: [
+          {
+            name: DASHBOARD_TOOL.name,
+            description: DASHBOARD_TOOL.description,
+            parameters: toGeminiSchema(DASHBOARD_TOOL.input_schema),
+          },
+        ],
+      },
+    ],
+    tool_config: {
+      function_calling_config: { mode: "ANY", allowed_function_names: [DASHBOARD_TOOL.name] },
+    },
+    contents: [
       {
         role: "user",
-        content: `Ticker: ${ticker}\n\nRaw market data (JSON):\n${JSON.stringify(marketData)}`,
+        parts: [{ text: `Ticker: ${ticker}\n\nRaw market data (JSON):\n${JSON.stringify(marketData)}` }],
       },
     ],
   };
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": anthropicKey,
-      "anthropic-version": ANTHROPIC_VERSION,
-    },
-    body: JSON.stringify(body),
-  });
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-goog-api-key": geminiKey },
+      body: JSON.stringify(body),
+    }
+  );
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Anthropic API error ${res.status}: ${text.slice(0, 500)}`);
+    throw new Error(`Gemini API error ${res.status}: ${text.slice(0, 500)}`);
   }
 
   const json = await res.json();
-  const toolUse = (json.content || []).find((b) => b.type === "tool_use");
-  if (!toolUse) throw new Error("Claude did not return a dashboard.");
-  return toolUse.input;
+  const parts = json.candidates?.[0]?.content?.parts || [];
+  const call = parts.find((p) => p.functionCall);
+  if (!call) throw new Error("Gemini did not return a dashboard.");
+  return call.functionCall.args;
 }
 
 // ---------------------------------------------------------------------------
@@ -728,8 +756,8 @@ export default {
     }
 
     if (path === "/analyze") {
-      if (!env.ANTHROPIC_API_KEY) {
-        return errorResponse(500, "Server is missing API keys. Set ANTHROPIC_API_KEY in the Worker's Settings > Variables.", headers);
+      if (!env.GEMINI_API_KEY) {
+        return errorResponse(500, "Server is missing API keys. Set GEMINI_API_KEY in the Worker's Settings > Variables.", headers);
       }
       const ticker = String(payload.ticker || "").trim().toUpperCase();
       if (!isValidTicker(ticker)) {
@@ -740,7 +768,7 @@ export default {
         if (marketData.error) {
           return errorResponse(404, marketData.error, headers);
         }
-        const dashboard = await callClaude(ticker, marketData, env.ANTHROPIC_API_KEY);
+        const dashboard = await callGemini(ticker, marketData, env.GEMINI_API_KEY);
         return jsonResponse(200, dashboard, headers);
       } catch (err) {
         return errorResponse(500, err.message || "Something went wrong.", headers);

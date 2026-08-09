@@ -6,7 +6,7 @@ A mobile-friendly web app version of the `swing-trade-analyst` skill, so friends
 - **Analyze** — type a ticker, get the same traffic-light dashboard (verdict, entry/stop/target, 52-week chart, expandable technical/sentiment detail) the skill produces.
 - **Paper Trading** — practice swing trading with a virtual $100,000 portfolio and live prices, with optional push notifications when a position hits its stop or target.
 
-Everything runs as a normal website friends can "Add to Home Screen." No API keys to manage besides your own Anthropic key — all market data comes from Yahoo Finance's public endpoints, which need no key and no signup.
+Everything runs as a normal website friends can "Add to Home Screen." No paid API keys required — the LLM behind Analyze runs on Google Gemini's free tier, and all market data comes from Yahoo Finance's public endpoints, which need no key and no signup either.
 
 ## How it works
 
@@ -17,7 +17,7 @@ Friend's phone/browser
 docs/  (static HTML/CSS/JS — hosted on GitHub Pages)
    │  POST { ticker: "NVDA" }
    ▼
-worker/worker.js  (Cloudflare Worker — holds your Anthropic key server-side)
+worker/worker.js  (Cloudflare Worker — holds your Gemini key server-side)
    │  fetches quote + price history from Yahoo Finance,
    │  computes RSI/MACD locally, fetches ticker news from Yahoo
    ▼
@@ -25,9 +25,9 @@ Yahoo Finance public endpoints (no key required)
    │  raw price history + company info + headlines
    ▼
 worker/worker.js
-   │  sends data + skill instructions to Claude, forces structured JSON output
+   │  sends data + skill instructions to Gemini, forces structured JSON output
    ▼
-Anthropic API (claude-sonnet-5)
+Google Gemini API (gemini-3.6-flash, free tier)
    │  dashboard JSON
    ▼
 back to the browser → renders the dashboard, with a "Paper trade this setup" button
@@ -56,7 +56,7 @@ Position closes in their local portfolio, using the fresh price (not the stale p
 The Markets tab works the same read-through-cache way: it asks the Worker for `/market`, the Worker serves whatever's in KV if it's fresh (indices ≤6h old, news ≤20min old), and only fetches live from Yahoo Finance when the cache is stale or empty. That's just about keeping page loads fast — there's no daily quota to protect anymore.
 
 Three pieces to deploy, all free:
-1. **Cloudflare Worker** — the backend. Holds your Anthropic and Web Push (VAPID) keys server-side. Deployed via a GitHub connection (Cloudflare builds and deploys automatically on every push — see Step 2).
+1. **Cloudflare Worker** — the backend. Holds your Gemini and Web Push (VAPID) keys server-side. Deployed via a GitHub connection (Cloudflare builds and deploys automatically on every push — see Step 2).
 2. **Cloudflare KV + Cron Trigger** — a tiny key-value store plus a scheduled job, both added as bindings/triggers in the Worker's dashboard page. Powers push alerts *and* keeps the Markets tab fast. Skippable, but both features degrade without it — see Step 2.5.
 3. **GitHub Pages** — the frontend. Static files, deployed by pushing to a GitHub repo. This is the URL you send your friends.
 
@@ -64,10 +64,13 @@ Nothing here talks to your local machine after deployment — all three pieces r
 
 ---
 
-## Step 1 — Get an Anthropic API key
+## Step 1 — Get a free Google Gemini API key
 
-1. Go to **https://console.anthropic.com** → **API Keys** → create a key.
-2. This is billed per token — see **Costs** below before sharing widely.
+1. Go to **https://aistudio.google.com/apikey** and sign in with a Google account.
+2. **Create API key** → **Create API key in new project** (or an existing one). No card required — the free tier has no billing account attached.
+3. Save the key somewhere — you'll paste it into Cloudflare in Step 2.
+
+The free tier has no dollar cost, just a daily/per-minute request cap (check your exact numbers at **https://aistudio.google.com/rate-limit** once the key exists) — see **Costs** below.
 
 ## Step 2 — Deploy the Worker (backend)
 
@@ -78,8 +81,8 @@ This repo includes a [`wrangler.jsonc`](wrangler.jsonc) at the root, so Cloudfla
 3. **Workers & Pages → Create → Create Worker**. Give it a name (e.g. `tape-proxy`), deploy the default "Hello World" once.
 4. Open the Worker → **Settings** → find the **Build** section → connect it to your GitHub repo. Cloudflare will detect `wrangler.jsonc` and use it for the KV binding + Cron Trigger automatically once you add them (Step 2.5) and push.
 5. Go to the Worker's **Settings → Variables and Secrets**. Add:
-   - `ANTHROPIC_API_KEY` — secret — your key from Step 1
-   - `APP_KEY` — secret — make up any random string (e.g. `openssl rand -hex 16`, or just mash the keyboard). This is a lightweight check so random people can't hit your endpoint and burn your Anthropic credits — see **Security notes** below for its real limits.
+   - `GEMINI_API_KEY` — secret — your key from Step 1
+   - `APP_KEY` — secret — make up any random string (e.g. `openssl rand -hex 16`, or just mash the keyboard). This is a lightweight check so random people can't hit your endpoint and burn through your Gemini free-tier quota — see **Security notes** below for its real limits.
 6. Optionally add `ALLOWED_ORIGIN` set to your future GitHub Pages URL (Step 4) to restrict CORS — you can add this after Step 4 once you know the URL.
 7. Copy the Worker's URL from the top of the page — it looks like `https://tape-proxy.<your-subdomain>.workers.dev`. You'll need this in Step 5.
 
@@ -122,7 +125,7 @@ This powers two things: a phone notification the moment a paper position hits it
 ## Step 5 — Test it
 
 1. Open your GitHub Pages URL on your phone. You should land on the **Markets** tab with three index cards and a handful of headlines — if it's empty or errors, see **Troubleshooting the Markets tab** below.
-2. Switch to **Analyze**, type a ticker (e.g. `NVDA`), and tap Analyze. First run takes 15–30 seconds (a few Yahoo Finance fetches + one Claude call).
+2. Switch to **Analyze**, type a ticker (e.g. `NVDA`), and tap Analyze. First run takes 15–30 seconds (a few Yahoo Finance fetches + one Gemini call).
 3. **Add to Home Screen**: iOS Safari — Share icon → Add to Home Screen. Android Chrome — menu (⋮) → Add to Home Screen / Install app. The app shows a one-time tip for iOS users automatically. **On iOS, push notifications only work after the app has been added to the Home Screen** (iOS 16.4+) — opening the site in a regular Safari tab won't offer them.
 4. Try Paper Trading: switch tabs, tap **+ New paper trade**, buy something with a stop/target set, tap **Enable notifications**. You should get a "Test notification" almost immediately — that confirms the whole push pipeline (Worker crypto → push service → your phone) works end to end.
 5. Send the GitHub Pages link to friends — as many as you want, at the same time, with no shared daily quota to worry about.
@@ -139,7 +142,7 @@ The default landing view. Two independent pieces, cached separately:
 
 ## Analyze tab
 
-RSI(14) and MACD(12,26,9) are computed locally in the Worker from a year of Yahoo Finance daily price history — not fetched pre-computed from anywhere, so there's no external technical-indicators API to depend on. Company name/sector and ticker-specific headlines come from Yahoo Finance's search endpoint. There's no pre-scored sentiment feed; Claude reads the raw headlines itself and writes the sentiment section directly from that (and says so plainly if no analyst-rating data is available, rather than guessing).
+RSI(14) and MACD(12,26,9) are computed locally in the Worker from a year of Yahoo Finance daily price history — not fetched pre-computed from anywhere, so there's no external technical-indicators API to depend on. Company name/sector and ticker-specific headlines come from Yahoo Finance's search endpoint. There's no pre-scored sentiment feed; Gemini reads the raw headlines itself and writes the sentiment section directly from that (and says so plainly if no analyst-rating data is available, rather than guessing).
 
 ## Paper trading
 
@@ -154,16 +157,16 @@ Practice mode with a virtual $100,000 starting balance, live prices, and long-on
 ## Costs
 
 - **Yahoo Finance**: free, no key, no signup, no daily quota — covers indices, ticker quotes, price history, company info, and news.
-- **Anthropic API**: pay-per-token on `claude-sonnet-5` — **$2 / $10 per million input/output tokens** through 2026-08-31 (intro pricing; reverts to $3 / $15 after). Only the Analyze flow calls Claude — paper trading and quotes don't. A single Analyze run sends ~3,000–6,000 input tokens and gets back ~1,500–3,000 output tokens — roughly **$0.02–$0.05 per analysis** at intro pricing. Fine for casual testing with a few friends; set a spend limit in the Anthropic Console if you're worried about a runaway bill.
+- **Google Gemini API**: free tier on `gemini-3.6-flash` — no card, no dollar cost. Only the Analyze flow calls it — paper trading and quotes don't. The free tier caps requests per minute and per day rather than charging by token; check your exact numbers at **https://aistudio.google.com/rate-limit**. If you outgrow it, Gemini also has a cheap pay-as-you-go tier you can switch to by attaching billing in AI Studio — no code changes needed, same API key.
 - **Cloudflare Workers**: free tier covers 100,000 requests/day and 1,000 Cron Trigger invocations/day — you won't come close.
 - **Cloudflare KV**: free tier covers 100,000 reads/day and 1,000 writes/day — each watch registration is 1 write, each Cron cycle is roughly 1 read per active watch. Fine at friends-and-family scale.
 - **GitHub Pages**: free for public repos.
 
 ## Security & privacy notes (read before sharing the link widely)
 
-- `APP_KEY` is visible to anyone who opens your browser's dev tools — it's not a real secret, just a speed bump that stops casual scripted abuse and keeps your endpoint out of search-engine crawlers. It does **not** stop a motivated person from finding it and hammering your Worker (and your Anthropic bill).
+- `APP_KEY` is visible to anyone who opens your browser's dev tools — it's not a real secret, just a speed bump that stops casual scripted abuse and keeps your endpoint out of search-engine crawlers. It does **not** stop a motivated person from finding it and hammering your Worker (and burning through your Gemini free-tier quota for the day).
 - For real protection against abuse: in the Cloudflare dashboard, go to **Security → WAF → Rate limiting rules** on your Worker's route and cap requests per IP per minute — this is a few clicks, no code.
-- Monitor spend in the **Anthropic Console** (usage limits can be set per-key).
+- Monitor usage against your free-tier limits at **https://aistudio.google.com/rate-limit**.
 - If you ever see unexpected usage, rotate the `APP_KEY` secret in Cloudflare (Settings → Variables) and update `docs/config.js` to match — this instantly cuts off anyone using the old key.
 - **What leaves the device for push notifications**: only the ticker, stop/target prices, and a push subscription (an opaque endpoint URL + public key the browser generates — not personal info) are sent to your Worker and stored in KV, for exactly as long as the watch is active (deleted the moment it fires or the position is closed). Cash balance, other positions, and trade history never leave `localStorage`.
 - **Never commit [`VAPID_KEYS_PRIVATE.txt`](VAPID_KEYS_PRIVATE.txt)** or paste its private key into anything under `docs/` — that folder is what gets pushed publicly to GitHub Pages.
@@ -180,7 +183,7 @@ This is the most complex part of the app (hand-implemented Web Push encryption, 
 
 ## Troubleshooting the Markets/Analyze tabs
 
-- **Empty or errors on first load**: normal the very first time — nothing's cached yet, so the Worker does a live fetch. If it still fails, check `ANTHROPIC_API_KEY` is set (Step 2) — Analyze needs it; Markets doesn't.
+- **Empty or errors on first load**: normal the very first time — nothing's cached yet, so the Worker does a live fetch. If it still fails, check `GEMINI_API_KEY` is set (Step 2) — Analyze needs it; Markets doesn't.
 - **Indices show but news doesn't (or vice versa)**: the two are fetched and cached independently, so one failing doesn't affect the other. Check Worker logs (see push troubleshooting above) for a fetch error on `finance.yahoo.com`.
 - **Data feels stale**: indices only refresh every 6 hours by design (see **Markets tab** above) — that's not a bug. News refreshes every 20 minutes.
 - **Without Step 2.5 (no KV bound)**: the Markets tab still works, just recomputes live on every load — fine for solo testing, just slower once more than one or two people are using the link.
