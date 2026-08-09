@@ -149,7 +149,7 @@ function corsHeaders(origin, allowedOrigin) {
   return {
     "Access-Control-Allow-Origin": allow,
     "Access-Control-Allow-Methods": "POST, OPTIONS, DELETE",
-    "Access-Control-Allow-Headers": "Content-Type, X-App-Key",
+    "Access-Control-Allow-Headers": "Content-Type, X-App-Key, X-AV-Key",
     "Access-Control-Max-Age": "86400",
   };
 }
