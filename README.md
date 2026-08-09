@@ -14,7 +14,7 @@ Everything runs as a normal website friends can "Add to Home Screen."
 Friend's phone/browser
    │  types "NVDA", taps Analyze
    ▼
-frontend/  (static HTML/CSS/JS — hosted on GitHub Pages)
+docs/  (static HTML/CSS/JS — hosted on GitHub Pages)
    │  POST { ticker: "NVDA" }
    ▼
 worker/worker.js  (Cloudflare Worker — holds your API keys, nobody else sees them)
@@ -103,10 +103,10 @@ This powers two things: a phone notification the moment a paper position hits it
    - Your Worker → **Triggers** tab → **Cron Triggers** → **Add Cron Trigger**.
    - Use `0 */4 * * *` (every 4 hours) — see **Alpha Vantage budget** below before picking a tighter interval.
 3. **Set the VAPID keys** (Web Push authentication — only needed for push notifications, not for the Markets tab — already generated for you):
-   - Open [`VAPID_KEYS_PRIVATE.txt`](VAPID_KEYS_PRIVATE.txt) in this project. **Do not commit this file or paste it into `frontend/`.**
+   - Open [`VAPID_KEYS_PRIVATE.txt`](VAPID_KEYS_PRIVATE.txt) in this project. **Do not commit this file or paste it into `docs/`.**
    - Worker → **Settings → Variables and Secrets** → add:
      - `VAPID_PRIVATE_KEY` — the private key from that file, as a **secret**.
-     - `VAPID_PUBLIC_KEY` — the public key from that file, as a **plain variable** (it's meant to be public — it also goes in `frontend/config.js` in Step 5).
+     - `VAPID_PUBLIC_KEY` — the public key from that file, as a **plain variable** (it's meant to be public — it also goes in `docs/config.js` in Step 5).
      - `VAPID_SUBJECT` — a plain variable, `mailto:` + your email. Push services use this to contact you if something's wrong with your server; it's not shown to end users.
    - Want your own keys instead of the generated ones? Any tool that outputs a P-256 EC keypair works, but the easiest is to ask Claude to regenerate them the same way this project's were made (Python `cryptography`, P-256, uncompressed-point + base64url encoding).
 4. **Redeploy** the Worker (Edit code → Deploy) so it picks up the new bindings.
@@ -114,9 +114,9 @@ This powers two things: a phone notification the moment a paper position hits it
 ## Step 4 — Deploy the frontend (GitHub Pages)
 
 1. Create a new **public** GitHub repository (needed for free GitHub Pages) — e.g. `swing-trade-demo`.
-2. Push this project's `frontend/` folder contents to the repo root (not the whole `Tape` project — just what's inside `frontend/`). From this machine:
+2. Push this project's `docs/` folder contents to the repo root (not the whole `Tape` project — just what's inside `docs/`). From this machine:
    ```bash
-   cd frontend
+   cd docs
    git init
    git add .
    git commit -m "Tape — market pulse, swing trade analysis, paper trading"
@@ -130,7 +130,7 @@ This powers two things: a phone notification the moment a paper position hits it
 
 ## Step 5 — Wire the frontend to the backend
 
-1. Edit `frontend/config.js` in your repo (GitHub's web editor works fine — click the file, pencil icon):
+1. Edit `docs/config.js` in your repo (GitHub's web editor works fine — click the file, pencil icon):
    ```js
    window.SWING_TRADE_CONFIG = {
      API_URL: "https://swing-trade-proxy.<your-subdomain>.workers.dev",
@@ -195,9 +195,9 @@ A `0 */4 * * *` Cron Trigger (every 4 hours = 6 cycles/day) watching 3 different
 - `APP_KEY` is visible to anyone who opens your browser's dev tools — it's not a real secret, just a speed bump that stops casual scripted abuse and keeps your endpoint out of search-engine crawlers. It does **not** stop a motivated person from finding it and hammering your Worker (and your Anthropic bill).
 - For real protection against abuse: in the Cloudflare dashboard, go to **Security → WAF → Rate limiting rules** on your Worker's route and cap requests per IP per minute — this is a few clicks, no code.
 - Monitor spend in the **Anthropic Console** (usage limits can be set per-key) and Alpha Vantage's dashboard.
-- If you ever see unexpected usage, rotate the `APP_KEY` secret in Cloudflare (Settings → Variables) and update `frontend/config.js` to match — this instantly cuts off anyone using the old key.
+- If you ever see unexpected usage, rotate the `APP_KEY` secret in Cloudflare (Settings → Variables) and update `docs/config.js` to match — this instantly cuts off anyone using the old key.
 - **What leaves the device for push notifications**: only the ticker, stop/target prices, and a push subscription (an opaque endpoint URL + public key the browser generates — not personal info) are sent to your Worker and stored in KV, for exactly as long as the watch is active (deleted the moment it fires or the position is closed). Cash balance, other positions, and trade history never leave `localStorage`.
-- **Never commit [`VAPID_KEYS_PRIVATE.txt`](VAPID_KEYS_PRIVATE.txt)** or paste its private key into anything under `frontend/` — that folder is what gets pushed publicly to GitHub Pages.
+- **Never commit [`VAPID_KEYS_PRIVATE.txt`](VAPID_KEYS_PRIVATE.txt)** or paste its private key into anything under `docs/` — that folder is what gets pushed publicly to GitHub Pages.
 
 ## Troubleshooting push notifications
 
@@ -220,7 +220,7 @@ This is the most complex part of the app (hand-implemented Web Push encryption, 
 
 You can preview the frontend locally without deploying anything:
 ```bash
-python3 -m http.server 8791 --directory frontend
+python3 -m http.server 8791 --directory docs
 ```
 Then open `http://localhost:8791`. It won't be able to call the backend until you've set `config.js` to a deployed Worker URL — you'll see a "not wired up" message otherwise.
 
