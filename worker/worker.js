@@ -296,10 +296,10 @@ async function fetchIndexProxy(proxy, avKey) {
   return { ...proxy, price: latest ? latest.close : null, changePercent, asOf: latest ? latest.date : null, points };
 }
 
-async function fetchIndices(env) {
+async function fetchIndices(avKey) {
   const indices = [];
   for (const proxy of INDEX_PROXIES) {
-    indices.push(await fetchIndexProxy(proxy, env.ALPHAVANTAGE_API_KEY));
+    indices.push(await fetchIndexProxy(proxy, avKey));
   }
   return { indices, updatedAt: Date.now() };
 }
@@ -363,8 +363,8 @@ async function getCached(env, key, ttlMs, refresh) {
   return fresh;
 }
 
-async function getIndices(env) {
-  return getCached(env, "market:indices", INDICES_TTL_MS, () => fetchIndices(env));
+async function getIndices(env, avKey) {
+  return getCached(env, "market:indices", INDICES_TTL_MS, () => fetchIndices(avKey));
 }
 
 async function getNews(env) {
@@ -630,7 +630,7 @@ export default {
 
     if (path === "/market") {
       try {
-        const [indices, news] = await Promise.all([getIndices(env), getNews(env)]);
+        const [indices, news] = await Promise.all([getIndices(env, avKey), getNews(env)]);
         return jsonResponse(200, { indices: indices.indices, indicesUpdatedAt: indices.updatedAt, news: news.items, newsUpdatedAt: news.updatedAt }, headers);
       } catch (err) {
         return errorResponse(500, err.message || "Couldn't load market data.", headers);
@@ -689,7 +689,7 @@ export default {
 
   async scheduled(event, env, ctx) {
     ctx.waitUntil(runWatchCheck(env));
-    ctx.waitUntil(getCached(env, "market:indices", 0, () => fetchIndices(env)).catch(() => {}));
+    ctx.waitUntil(getCached(env, "market:indices", 0, () => fetchIndices(env.ALPHAVANTAGE_API_KEY)).catch(() => {}));
     ctx.waitUntil(getCached(env, "market:news", 0, fetchNews).catch(() => {}));
   },
 };
