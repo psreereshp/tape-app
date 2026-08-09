@@ -340,7 +340,7 @@ async function fetchNews() {
   }
 }
 
-async function getCached(env, key, ttlMs, refresh) {
+async function getCached(env, key, ttlMs, refresh, isCacheable) {
   if (env.WATCHLIST) {
     try {
       const raw = await env.WATCHLIST.get(key);
@@ -353,7 +353,7 @@ async function getCached(env, key, ttlMs, refresh) {
     }
   }
   const fresh = await refresh();
-  if (env.WATCHLIST) {
+  if (env.WATCHLIST && (!isCacheable || isCacheable(fresh))) {
     try {
       await env.WATCHLIST.put(key, JSON.stringify(fresh));
     } catch {
@@ -363,8 +363,14 @@ async function getCached(env, key, ttlMs, refresh) {
   return fresh;
 }
 
+// A rate-limit (or other) error isn't worth caching for the full TTL — an error
+// cached like real data would block every retry, including ones with a fresh key.
+function indicesAreCacheable(data) {
+  return Array.isArray(data.indices) && data.indices.some((i) => !i.error);
+}
+
 async function getIndices(env, avKey) {
-  return getCached(env, "market:indices", INDICES_TTL_MS, () => fetchIndices(avKey));
+  return getCached(env, "market:indices", INDICES_TTL_MS, () => fetchIndices(avKey), indicesAreCacheable);
 }
 
 async function getNews(env) {
@@ -689,7 +695,7 @@ export default {
 
   async scheduled(event, env, ctx) {
     ctx.waitUntil(runWatchCheck(env));
-    ctx.waitUntil(getCached(env, "market:indices", 0, () => fetchIndices(env.ALPHAVANTAGE_API_KEY)).catch(() => {}));
+    ctx.waitUntil(getCached(env, "market:indices", 0, () => fetchIndices(env.ALPHAVANTAGE_API_KEY), indicesAreCacheable).catch(() => {}));
     ctx.waitUntil(getCached(env, "market:news", 0, fetchNews).catch(() => {}));
   },
 };
