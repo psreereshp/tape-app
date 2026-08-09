@@ -579,6 +579,11 @@ export default {
       return errorResponse(401, "Unauthorized.", headers);
     }
 
+    // A caller may bring their own Alpha Vantage key (X-AV-Key) to use their own
+    // 25-requests/day quota instead of sharing the server's key across everyone.
+    const ownAvKey = (request.headers.get("X-AV-Key") || "").trim();
+    const avKey = ownAvKey || env.ALPHAVANTAGE_API_KEY;
+
     let payload;
     try {
       payload = await request.json();
@@ -587,7 +592,7 @@ export default {
     }
 
     if (path === "/analyze") {
-      if (!env.ANTHROPIC_API_KEY || !env.ALPHAVANTAGE_API_KEY) {
+      if (!env.ANTHROPIC_API_KEY || !avKey) {
         return errorResponse(500, "Server is missing API keys. Set ANTHROPIC_API_KEY and ALPHAVANTAGE_API_KEY in the Worker's Settings > Variables.", headers);
       }
       const ticker = String(payload.ticker || "").trim().toUpperCase();
@@ -595,9 +600,10 @@ export default {
         return errorResponse(400, "Enter a valid ticker symbol, e.g. NVDA.", headers);
       }
       try {
-        const marketData = await gatherMarketData(ticker, env.ALPHAVANTAGE_API_KEY);
+        const marketData = await gatherMarketData(ticker, avKey);
         if (marketData.globalQuote && marketData.globalQuote.__error) {
-          return errorResponse(429, `Market-data feed error: ${marketData.globalQuote.__error}. This usually means the Alpha Vantage free-tier daily limit (25 calls/day) has been hit — try again tomorrow, or upgrade the key.`, headers);
+          const whoseLimit = ownAvKey ? "your personal key's" : "the shared group key's";
+          return errorResponse(429, `Market-data feed error: ${marketData.globalQuote.__error}. This usually means ${whoseLimit} free-tier daily limit (25 calls/day) has been hit — try again tomorrow, or use your own key in Settings.`, headers);
         }
         const dashboard = await callClaude(ticker, marketData, env.ANTHROPIC_API_KEY);
         return jsonResponse(200, dashboard, headers);
@@ -607,16 +613,17 @@ export default {
     }
 
     if (path === "/quote") {
-      if (!env.ALPHAVANTAGE_API_KEY) {
+      if (!avKey) {
         return errorResponse(500, "Server is missing ALPHAVANTAGE_API_KEY.", headers);
       }
       const ticker = String(payload.ticker || "").trim().toUpperCase();
       if (!isValidTicker(ticker)) {
         return errorResponse(400, "Enter a valid ticker symbol, e.g. NVDA.", headers);
       }
-      const q = extractQuote(await fetchAV("GLOBAL_QUOTE", { symbol: ticker }, env.ALPHAVANTAGE_API_KEY));
+      const q = extractQuote(await fetchAV("GLOBAL_QUOTE", { symbol: ticker }, avKey));
       if (!q) {
-        return errorResponse(429, "Market-data feed error — likely the Alpha Vantage daily limit (25 calls/day). Try again later.", headers);
+        const whoseLimit = ownAvKey ? "your personal key's" : "the shared group key's";
+        return errorResponse(429, `Market-data feed error — likely ${whoseLimit} Alpha Vantage daily limit (25 calls/day). Try again later.`, headers);
       }
       return jsonResponse(200, { ticker, ...q }, headers);
     }

@@ -227,11 +227,13 @@
     setStatus(`<span class="spinner"></span>Pulling technicals, history, and sentiment for ${esc(ticker)}… this can take 15–30s.`);
 
     try {
+      const ownAvKey = (localStorage.getItem("tape_av_key") || "").trim();
       const res = await fetch(`${cfg.API_URL}/analyze`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
           ...(cfg.APP_KEY ? { "X-App-Key": cfg.APP_KEY } : {}),
+          ...(ownAvKey ? { "X-AV-Key": ownAvKey } : {}),
         },
         body: JSON.stringify({ ticker }),
       });
@@ -294,6 +296,49 @@
     $tabMarkets.addEventListener("click", () => show("markets"));
     $tabAnalyze.addEventListener("click", () => show("analyze"));
     $tabPaper.addEventListener("click", () => show("paper"));
+  })();
+
+  // Settings modal — optional personal Alpha Vantage key, stored in this browser only
+  (function settings() {
+    const $btn = document.getElementById("settingsBtn");
+    const $overlay = document.getElementById("settingsModalOverlay");
+    const $close = document.getElementById("settingsModalClose");
+    const $input = document.getElementById("ownAvKeyInput");
+    const $save = document.getElementById("ownAvKeySaveBtn");
+    const $clear = document.getElementById("ownAvKeyClearBtn");
+    const $status = document.getElementById("settingsModalStatus");
+
+    function open() {
+      $input.value = localStorage.getItem("tape_av_key") || "";
+      $status.textContent = "";
+      $overlay.hidden = false;
+    }
+    function close() {
+      $overlay.hidden = true;
+    }
+
+    $btn.addEventListener("click", open);
+    $close.addEventListener("click", close);
+    $overlay.addEventListener("click", (e) => {
+      if (e.target === $overlay) close();
+    });
+
+    $save.addEventListener("click", () => {
+      const val = ($input.value || "").trim();
+      if (val) {
+        localStorage.setItem("tape_av_key", val);
+        $status.textContent = "Saved — your analyses and paper-trade quotes will now use your own key.";
+      } else {
+        localStorage.removeItem("tape_av_key");
+        $status.textContent = "Saved — using the shared group key.";
+      }
+    });
+
+    $clear.addEventListener("click", () => {
+      localStorage.removeItem("tape_av_key");
+      $input.value = "";
+      $status.textContent = "Cleared — using the shared group key.";
+    });
   })();
 
   // Register the service worker for push notifications (paper.js handles subscribing)
