@@ -3,7 +3,6 @@
 // Secrets/vars to set in the Worker's Settings > Variables and Secrets
 // (never put these in this file):
 //   ANTHROPIC_API_KEY     — secret — your Anthropic API key
-//   ALPHAVANTAGE_API_KEY  — secret — your free/paid Alpha Vantage key
 //   APP_KEY                — secret — a shared token the frontend sends, so this
 //                             endpoint isn't wide open to anyone on the internet
 //   VAPID_PRIVATE_KEY      — secret — see VAPID_KEYS_PRIVATE.txt / README
@@ -76,7 +75,7 @@ const DASHBOARD_TOOL = {
       },
       chartApproximate: { type: "boolean" },
       keyRisk: { type: "string" },
-      provenance: { type: "string", description: "e.g. \"Live data via Alpha Vantage, as of Aug 7 close\"" },
+      provenance: { type: "string", description: "e.g. \"Live data via Yahoo Finance, as of Aug 7 close\"" },
       technical: {
         type: "object",
         properties: {
@@ -117,11 +116,13 @@ const DASHBOARD_TOOL = {
   },
 };
 
-const SYSTEM_PROMPT = `You are the "Swing Trade Analyst" skill. Given raw Alpha Vantage market data for one ticker, produce a swing-trade dashboard by calling the render_dashboard tool.
+const SYSTEM_PROMPT = `You are the "Swing Trade Analyst" skill. Given raw market data for one ticker (quote, price history, locally-computed RSI/MACD, and recent headlines), produce a swing-trade dashboard by calling the render_dashboard tool.
 
 Swing trade = holding days to weeks, riding a technical move. Focus on price action, momentum, near-term catalysts — not deep fundamentals.
 
 Precision is required: never fabricate a number. If a data point is missing from the provided JSON, say so in the relevant text field rather than inventing one. Only use the real chart points given to you — never synthesize intermediate points; if fewer than ~8 points are available, set chartApproximate to true.
+
+There is no pre-scored sentiment metric or analyst-rating feed — infer newsTakeaway/newsDetail yourself by reading the recentNews headlines directly. If no analyst-rating data is present, say so plainly in analystTakeaway/analystDetail rather than guessing.
 
 Write for a non-expert:
 - Every "*Takeaway" field must be a plain-English sentence a beginner understands — no jargon.
@@ -149,7 +150,7 @@ function corsHeaders(origin, allowedOrigin) {
   return {
     "Access-Control-Allow-Origin": allow,
     "Access-Control-Allow-Methods": "POST, OPTIONS, DELETE",
-    "Access-Control-Allow-Headers": "Content-Type, X-App-Key, X-AV-Key",
+    "Access-Control-Allow-Headers": "Content-Type, X-App-Key",
     "Access-Control-Max-Age": "86400",
   };
 }
@@ -166,56 +167,144 @@ function isValidTicker(ticker) {
   return typeof ticker === "string" && TICKER_RE.test(ticker);
 }
 
-async function fetchAV(fn, params, apiKey) {
-  const url = new URL("https://www.alphavantage.co/query");
-  url.searchParams.set("function", fn);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  url.searchParams.set("apikey", apiKey);
-  const res = await fetch(url.toString());
-  if (!res.ok) return { __error: `HTTP ${res.status}` };
-  const json = await res.json();
-  if (json.Note || json.Information) return { __error: json.Note || json.Information };
-  return json;
+// ---------------------------------------------------------------------------
+// Yahoo Finance data + locally-computed technicals — no API key, no
+// per-key/per-server rate limit (see fetchIndexProxy below for why Alpha
+// Vantage was dropped entirely: it rate-limits by calling IP, not key).
+// ---------------------------------------------------------------------------
+
+async function fetchYahooChartFull(symbol, range, interval) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
+  let json;
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!res.ok) return null;
+    json = await res.json();
+  } catch {
+    return null;
+  }
+  const result = json?.chart?.result?.[0];
+  if (!result) return null;
+  const timestamps = result.timestamp || [];
+  const q = result.indicators?.quote?.[0] || {};
+  const points = timestamps
+    .map((t, i) => ({
+      date: new Date(t * 1000).toISOString().slice(0, 10),
+      open: q.open?.[i],
+      high: q.high?.[i],
+      low: q.low?.[i],
+      close: q.close?.[i],
+      volume: q.volume?.[i],
+    }))
+    .filter((p) => p.close != null);
+  return { meta: result.meta, points };
 }
 
-function trimTimeSeries(json, maxPoints = 14) {
-  const seriesKey = Object.keys(json || {}).find((k) => k.toLowerCase().includes("time series"));
-  if (!seriesKey) return json;
-  const entries = Object.entries(json[seriesKey]).slice(0, maxPoints);
-  return { ...json, [seriesKey]: Object.fromEntries(entries) };
+async function fetchYahooSearchInfo(symbol) {
+  const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(symbol)}&newsCount=8&quotesCount=5`;
+  let json;
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!res.ok) return { companyInfo: null, news: [] };
+    json = await res.json();
+  } catch {
+    return { companyInfo: null, news: [] };
+  }
+  const quote = (json.quotes || []).find((q) => q.symbol === symbol) || (json.quotes || [])[0] || null;
+  const companyInfo = quote
+    ? { name: quote.longname || quote.shortname || symbol, sector: quote.sector || null, industry: quote.industry || null }
+    : null;
+  const news = (json.news || []).slice(0, 8).map((n) => ({
+    title: n.title,
+    publisher: n.publisher,
+    link: n.link,
+    publishedAt: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toISOString() : null,
+  }));
+  return { companyInfo, news };
 }
 
-function trimNews(json, maxArticles = 8) {
-  if (!json || !Array.isArray(json.feed)) return json;
-  return {
-    ...json,
-    feed: json.feed.slice(0, maxArticles).map((a) => ({
-      title: a.title,
-      time_published: a.time_published,
-      summary: a.summary,
-      overall_sentiment_label: a.overall_sentiment_label,
-      overall_sentiment_score: a.overall_sentiment_score,
-    })),
-  };
+// Wilder's smoothed RSI — standard 14-period formula.
+function computeRSI(points, period = 14) {
+  if (points.length < period + 1) return null;
+  const closes = points.map((p) => p.close);
+  let avgGain = 0;
+  let avgLoss = 0;
+  for (let i = 1; i <= period; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff >= 0) avgGain += diff;
+    else avgLoss -= diff;
+  }
+  avgGain /= period;
+  avgLoss /= period;
+  const series = [];
+  for (let i = period + 1; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    avgGain = (avgGain * (period - 1) + Math.max(diff, 0)) / period;
+    avgLoss = (avgLoss * (period - 1) + Math.max(-diff, 0)) / period;
+    const rsi = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+    series.push({ date: points[i].date, rsi: Math.round(rsi * 100) / 100 });
+  }
+  return series;
 }
 
-async function gatherMarketData(ticker, avKey) {
-  const [quote, overview, rsi, macd, monthly, news] = await Promise.all([
-    fetchAV("GLOBAL_QUOTE", { symbol: ticker }, avKey),
-    fetchAV("OVERVIEW", { symbol: ticker }, avKey),
-    fetchAV("RSI", { symbol: ticker, interval: "daily", time_period: "14", series_type: "close" }, avKey),
-    fetchAV("MACD", { symbol: ticker, interval: "daily", series_type: "close" }, avKey),
-    fetchAV("TIME_SERIES_MONTHLY_ADJUSTED", { symbol: ticker }, avKey),
-    fetchAV("NEWS_SENTIMENT", { tickers: ticker }, avKey),
+function ema(values, period) {
+  const k = 2 / (period + 1);
+  const out = [values[0]];
+  for (let i = 1; i < values.length; i++) out.push(values[i] * k + out[i - 1] * (1 - k));
+  return out;
+}
+
+// Standard MACD(12,26,9): fast EMA minus slow EMA, plus a signal EMA of that line.
+function computeMACD(points, fast = 12, slow = 26, signalPeriod = 9) {
+  if (points.length < slow + signalPeriod) return null;
+  const closes = points.map((p) => p.close);
+  const emaFast = ema(closes, fast);
+  const emaSlow = ema(closes, slow);
+  const macdLine = closes.map((_, i) => emaFast[i] - emaSlow[i]);
+  const signalLine = ema(macdLine, signalPeriod);
+  return points.map((p, i) => ({
+    date: p.date,
+    macd: Math.round(macdLine[i] * 100) / 100,
+    signal: Math.round(signalLine[i] * 100) / 100,
+    histogram: Math.round((macdLine[i] - signalLine[i]) * 100) / 100,
+  }));
+}
+
+async function gatherMarketData(ticker) {
+  const [daily, monthly, info] = await Promise.all([
+    fetchYahooChartFull(ticker, "1y", "1d"),
+    fetchYahooChartFull(ticker, "2y", "1mo"),
+    fetchYahooSearchInfo(ticker),
   ]);
 
+  if (!daily || daily.points.length === 0) {
+    return { error: "Couldn't find price data for that ticker. Check the symbol and try again." };
+  }
+
+  const latest = daily.points[daily.points.length - 1];
+  const prev = daily.points[daily.points.length - 2];
+  const changePercent = prev ? ((latest.close - prev.close) / prev.close) * 100 : null;
+  const rsiSeries = computeRSI(daily.points, 14);
+  const macdSeries = computeMACD(daily.points, 12, 26, 9);
+
   return {
-    globalQuote: quote,
-    companyOverview: overview,
-    rsi: trimTimeSeries(rsi, 5),
-    macd: trimTimeSeries(macd, 5),
-    monthlyPriceHistory: trimTimeSeries(monthly, 13),
-    newsSentiment: trimNews(news, 8),
+    ticker,
+    companyName: info.companyInfo?.name || daily.meta?.longName || daily.meta?.shortName || ticker,
+    sector: info.companyInfo?.sector || null,
+    industry: info.companyInfo?.industry || null,
+    quote: {
+      price: latest.close,
+      changePercent,
+      asOf: latest.date,
+      fiftyTwoWeekHigh: daily.meta?.fiftyTwoWeekHigh ?? null,
+      fiftyTwoWeekLow: daily.meta?.fiftyTwoWeekLow ?? null,
+      previousClose: daily.meta?.chartPreviousClose ?? null,
+    },
+    dailyPriceHistory: daily.points.slice(-60),
+    rsi14: rsiSeries ? rsiSeries.slice(-5) : null,
+    macd: macdSeries ? macdSeries.slice(-5) : null,
+    monthlyPriceHistory: monthly ? monthly.points.slice(-13) : null,
+    recentNews: info.news,
   };
 }
 
@@ -229,7 +318,7 @@ async function callClaude(ticker, marketData, anthropicKey) {
     messages: [
       {
         role: "user",
-        content: `Ticker: ${ticker}\n\nRaw Alpha Vantage data (JSON):\n${JSON.stringify(marketData)}`,
+        content: `Ticker: ${ticker}\n\nRaw market data (JSON):\n${JSON.stringify(marketData)}`,
       },
     ],
   };
@@ -257,7 +346,7 @@ async function callClaude(ticker, marketData, anthropicKey) {
 
 // ---------------------------------------------------------------------------
 // Market overview (index proxies + news) — KV read-through cache so page
-// loads never directly spend the Alpha Vantage daily budget.
+// loads stay fast and don't hammer Yahoo Finance on every request.
 // ---------------------------------------------------------------------------
 
 const INDEX_PROXIES = [
@@ -267,7 +356,7 @@ const INDEX_PROXIES = [
 ];
 
 const INDICES_TTL_MS = 6 * 60 * 60 * 1000; // 6h — daily-close data doesn't need to refresh often
-const NEWS_TTL_MS = 20 * 60 * 1000; // 20m — free to refresh (no Alpha Vantage cost)
+const NEWS_TTL_MS = 20 * 60 * 1000; // 20m — cheap to refresh, no key or quota involved
 const YAHOO_NEWS_RSS_URL = "https://finance.yahoo.com/news/rssindex";
 
 // Alpha Vantage rate-limits by the calling Worker's shared egress IP, not the
@@ -555,7 +644,7 @@ async function sendWebPush(env, subscription, payloadObj) {
 // ---------------------------------------------------------------------------
 
 async function runWatchCheck(env) {
-  if (!env.WATCHLIST || !env.ALPHAVANTAGE_API_KEY || !env.VAPID_PRIVATE_KEY) return;
+  if (!env.WATCHLIST || !env.VAPID_PRIVATE_KEY) return;
 
   const list = await env.WATCHLIST.list({ prefix: "watch:" });
   if (list.keys.length === 0) return;
@@ -631,11 +720,6 @@ export default {
       return errorResponse(401, "Unauthorized.", headers);
     }
 
-    // A caller may bring their own Alpha Vantage key (X-AV-Key) to use their own
-    // 25-requests/day quota instead of sharing the server's key across everyone.
-    const ownAvKey = (request.headers.get("X-AV-Key") || "").trim();
-    const avKey = ownAvKey || env.ALPHAVANTAGE_API_KEY;
-
     let payload;
     try {
       payload = await request.json();
@@ -644,17 +728,17 @@ export default {
     }
 
     if (path === "/analyze") {
-      if (!env.ANTHROPIC_API_KEY || !avKey) {
-        return errorResponse(500, "Server is missing API keys. Set ANTHROPIC_API_KEY and ALPHAVANTAGE_API_KEY in the Worker's Settings > Variables.", headers);
+      if (!env.ANTHROPIC_API_KEY) {
+        return errorResponse(500, "Server is missing API keys. Set ANTHROPIC_API_KEY in the Worker's Settings > Variables.", headers);
       }
       const ticker = String(payload.ticker || "").trim().toUpperCase();
       if (!isValidTicker(ticker)) {
         return errorResponse(400, "Enter a valid ticker symbol, e.g. NVDA.", headers);
       }
       try {
-        const marketData = await gatherMarketData(ticker, avKey);
-        if (marketData.globalQuote && marketData.globalQuote.__error) {
-          return errorResponse(429, `Market-data feed error: ${marketData.globalQuote.__error}. Alpha Vantage's free tier rate-limits by the server's shared network address, not the API key — a personal key in Settings won't fix this endpoint. Try again later.`, headers);
+        const marketData = await gatherMarketData(ticker);
+        if (marketData.error) {
+          return errorResponse(404, marketData.error, headers);
         }
         const dashboard = await callClaude(ticker, marketData, env.ANTHROPIC_API_KEY);
         return jsonResponse(200, dashboard, headers);

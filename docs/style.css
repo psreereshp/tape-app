@@ -74,21 +74,6 @@ header.app-header .app-header-text {
   min-width: 0;
 }
 
-.settings-btn {
-  background: none;
-  border: none;
-  color: var(--text-faint);
-  font-size: 18px;
-  line-height: 1;
-  padding: 6px;
-  cursor: pointer;
-  border-radius: 8px;
-}
-
-.settings-btn:hover {
-  color: var(--text);
-  background: var(--panel-2);
-}
 
 .search-row {
   display: flex;

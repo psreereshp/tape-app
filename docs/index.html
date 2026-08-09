@@ -26,7 +26,6 @@
         <h1>Tape</h1>
         <div class="sub">Market pulse, swing-trade analysis &amp; paper trading — not financial advice</div>
       </div>
-      <button id="settingsBtn" class="settings-btn" aria-label="Settings" type="button">&#9881;</button>
     </header>
 
     <div id="iosTip" class="ios-tip">
@@ -97,27 +96,6 @@
 
       <button id="resetPortfolioBtn" class="text-btn" type="button">Reset portfolio</button>
     </section>
-  </div>
-
-  <div id="settingsModalOverlay" class="modal-overlay" hidden>
-    <div class="modal">
-      <div class="modal-header">
-        <span>Settings</span>
-        <button id="settingsModalClose" class="modal-close" aria-label="Close" type="button">&times;</button>
-      </div>
-      <div class="modal-body">
-        <label>Your Alpha Vantage API key (optional)
-          <input id="ownAvKeyInput" type="text" placeholder="Leave blank to use the shared group key" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" />
-        </label>
-        <div class="hint" style="margin-top:-6px;">
-          Markets and Paper Trading now use Yahoo Finance and don't need a key. This only affects the Analyze tab's deeper technical/sentiment data — and Alpha Vantage's free tier rate-limits by this server's network address, not by key, so a personal key may not help there either. Get one at
-          <a href="https://www.alphavantage.co/support/#api-key" target="_blank" rel="noopener noreferrer">alphavantage.co</a> if you want to try. Stored only in this browser.
-        </div>
-        <button id="ownAvKeySaveBtn" class="full-btn" type="button">Save</button>
-        <button id="ownAvKeyClearBtn" class="text-btn" type="button">Clear and use the shared key</button>
-        <div id="settingsModalStatus" class="trade-modal-status"></div>
-      </div>
-    </div>
   </div>
 
   <div id="tradeModalOverlay" class="modal-overlay" hidden>

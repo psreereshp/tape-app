@@ -54,13 +54,11 @@
 
   async function apiPost(path, body) {
     if (!cfg.API_URL) throw new Error("Not wired up to a backend yet — set API_URL in config.js.");
-    const ownAvKey = (localStorage.getItem("tape_av_key") || "").trim();
     const res = await fetch(`${cfg.API_URL}${path}`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         ...(cfg.APP_KEY ? { "X-App-Key": cfg.APP_KEY } : {}),
-        ...(ownAvKey ? { "X-AV-Key": ownAvKey } : {}),
       },
       body: JSON.stringify(body || {}),
     });
