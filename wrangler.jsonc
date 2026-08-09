@@ -1,0 +1,11 @@
+{
+  "name": "tape-proxy",
+  "main": "worker/worker.js",
+  "compatibility_date": "2026-08-08",
+  "kv_namespaces": [
+    { "binding": "WATCHLIST", "id": "b0cdcf5cb4f64e1cae2b1f3e44cca0b8" }
+  ],
+  "triggers": {
+    "crons": ["0 */4 * * *"]
+  }
+}

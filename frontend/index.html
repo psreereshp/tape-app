@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Tape</title>
+  <meta name="description" content="Market pulse, plain-English swing-trade analysis, and paper trading practice." />
+
+  <!-- Add to Home Screen support -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#0b0f14" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Tape" />
+
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body>
+  <div class="wrap">
+    <header class="app-header">
+      <img class="logo" src="icons/icon-192.png" alt="" />
+      <div>
+        <h1>Tape</h1>
+        <div class="sub">Market pulse, swing-trade analysis &amp; paper trading — not financial advice</div>
+      </div>
+    </header>
+
+    <div id="iosTip" class="ios-tip">
+      <span>Tip: tap the Share icon, then "Add to Home Screen" to install this.</span>
+      <button id="iosTipClose" aria-label="Dismiss">&times;</button>
+    </div>
+
+    <div class="tabs">
+      <button id="tabMarketsBtn" class="tab-btn active" type="button">Markets</button>
+      <button id="tabAnalyzeBtn" class="tab-btn" type="button">Analyze</button>
+      <button id="tabPaperBtn" class="tab-btn" type="button">Paper Trading</button>
+    </div>
+
+    <section id="marketsView">
+      <div class="section-row">
+        <div class="hint" style="margin:0;">Major indices (tracked via ETF proxies) and the day's market headlines.</div>
+        <button id="marketsRefreshBtn" class="mini-btn" type="button">Refresh</button>
+      </div>
+
+      <div id="indexCards" class="index-cards"></div>
+      <div id="marketsUpdated" class="chart-caption"></div>
+
+      <div class="card">
+        <div class="section-title" style="margin-bottom:10px;">Market news</div>
+        <div id="newsList"></div>
+      </div>
+    </section>
+
+    <section id="analyzeView" hidden>
+      <div class="search-row">
+        <input id="tickerInput" type="text" placeholder="Ticker, e.g. NVDA" maxlength="10" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" />
+        <button id="analyzeBtn">Analyze</button>
+      </div>
+      <div class="hint">Swing-trade read: days-to-weeks technicals, trend, and sentiment — not a long-term thesis.</div>
+
+      <div id="status"></div>
+
+      <div id="dashboard"></div>
+    </section>
+
+    <section id="paperView" hidden>
+      <div class="hint">Practice swing trading with a virtual portfolio and live prices. Nothing here is real money.</div>
+
+      <div id="paperTriggerBanner" class="trigger-banner" hidden></div>
+
+      <div class="card" id="portfolioSummary"></div>
+
+      <div class="card">
+        <div class="section-row">
+          <div class="section-title">Open positions</div>
+          <button id="refreshAllBtn" class="mini-btn" type="button">Refresh prices</button>
+        </div>
+        <div id="positionsList"></div>
+        <button id="newTradeBtn" class="full-btn" type="button">+ New paper trade</button>
+      </div>
+
+      <details class="expand">
+        <summary>Trade history <span class="chev">&#9660;</span></summary>
+        <div class="expand-body" id="historyList"></div>
+      </details>
+
+      <div class="card notify-card">
+        <div class="section-title">Notifications</div>
+        <p class="notify-copy">Get a push alert when a paper trade hits its stop or target — even if the app is closed.</p>
+        <button id="enableNotifyBtn" class="mini-btn" type="button">Enable notifications</button>
+        <span id="notifyStatus" class="notify-status"></span>
+      </div>
+
+      <button id="resetPortfolioBtn" class="text-btn" type="button">Reset portfolio</button>
+    </section>
+  </div>
+
+  <div id="tradeModalOverlay" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <span id="tradeModalTitle">New paper trade</span>
+        <button id="tradeModalClose" class="modal-close" aria-label="Close" type="button">&times;</button>
+      </div>
+      <div class="modal-body">
+        <label>Ticker
+          <input id="tradeTicker" type="text" maxlength="10" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" />
+        </label>
+        <label>Amount
+          <div class="amount-row">
+            <select id="tradeAmountMode">
+              <option value="dollars">$ to invest</option>
+              <option value="shares"># of shares</option>
+            </select>
+            <input id="tradeAmountValue" type="number" min="0" step="0.01" placeholder="1000" />
+          </div>
+        </label>
+        <label>Stop loss (optional)
+          <input id="tradeStop" type="number" min="0" step="0.01" placeholder="e.g. 171.20" />
+        </label>
+        <label>Target (optional)
+          <input id="tradeTarget" type="number" min="0" step="0.01" placeholder="e.g. 192.00" />
+        </label>
+        <div id="tradeModalStatus" class="trade-modal-status"></div>
+        <button id="tradeSubmitBtn" class="full-btn" type="button">Get live price &amp; buy</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+  <script src="markets.js"></script>
+  <script src="paper.js"></script>
+</body>
+</html>
