@@ -224,7 +224,7 @@
 
     $btn.disabled = true;
     $dashboard.classList.remove("visible");
-    setStatus(`<span class="spinner"></span>Pulling technicals, history, and sentiment for ${esc(ticker)}… this can take 15–30s.`);
+    setStatus(`<span class="spinner"></span>Pulling technicals, history, and sentiment for ${esc(ticker)}… this can take 15–60s.`);
 
     try {
       const res = await fetch(`${cfg.API_URL}/analyze`, {

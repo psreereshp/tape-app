@@ -125,7 +125,7 @@ This powers two things: a phone notification the moment a paper position hits it
 ## Step 5 — Test it
 
 1. Open your GitHub Pages URL on your phone. You should land on the **Markets** tab with three index cards and a handful of headlines — if it's empty or errors, see **Troubleshooting the Markets tab** below.
-2. Switch to **Analyze**, type a ticker (e.g. `NVDA`), and tap Analyze. First run takes 15–30 seconds (a few Yahoo Finance fetches + one Gemini call).
+2. Switch to **Analyze**, type a ticker (e.g. `NVDA`), and tap Analyze. Takes 15–60 seconds (a few Yahoo Finance fetches + one Gemini call — free-tier requests are occasionally slower than paid ones).
 3. **Add to Home Screen**: iOS Safari — Share icon → Add to Home Screen. Android Chrome — menu (⋮) → Add to Home Screen / Install app. The app shows a one-time tip for iOS users automatically. **On iOS, push notifications only work after the app has been added to the Home Screen** (iOS 16.4+) — opening the site in a regular Safari tab won't offer them.
 4. Try Paper Trading: switch tabs, tap **+ New paper trade**, buy something with a stop/target set, tap **Enable notifications**. You should get a "Test notification" almost immediately — that confirms the whole push pipeline (Worker crypto → push service → your phone) works end to end.
 5. Send the GitHub Pages link to friends — as many as you want, at the same time, with no shared daily quota to worry about.
