@@ -136,9 +136,14 @@ This powers two things: a phone notification the moment a paper position hits it
 
 The default landing view. Two independent pieces, cached separately:
 
-- **Indices**: S&P 500, Nasdaq, and Dow Jones are tracked via a liquid ETF proxy — **SPY**, **QQQ**, and **DIA** respectively (labeled "via SPY" etc. on each card, not presented as the literal index level — the % change is what's accurate and what matters for a market-pulse glance). Sourced from Yahoo Finance's public chart endpoint, cached in KV for **6 hours** — daily-close data doesn't need to refresh more often than that anyway.
+- **Indices**: S&P 500, Nasdaq, and Dow Jones are tracked via a liquid ETF proxy — **SPY**, **QQQ**, and **DIA** respectively (labeled "via SPY" etc. on each card, not presented as the literal index level — the % change is what's accurate and what matters for a market-pulse glance). Russell 2000, KOSPI, and SSE Composite are tracked as the literal index level instead (**^RUT**, **^KS11**, **000001.SS** — no liquid single-ticker US ETF tracks these closely enough), so their cards show the raw index value rather than a `$` price. Sourced from Yahoo Finance's public chart endpoint, cached in KV for **6 hours** — daily-close data doesn't need to refresh more often than that anyway.
 - **News**: pulled from Yahoo Finance's public top-stories RSS feed (`finance.yahoo.com/news/rssindex`), parsed by the Worker, cached in KV for **20 minutes**. This is an unofficial, undocumented feed — Yahoo could change its shape or retire it without notice. The Worker's RSS parser is regex-based (Workers have no built-in XML DOM parser) and degrades gracefully: if the fetch or parse fails, the news list just renders empty rather than breaking the rest of the page. If headlines stop showing up, that feed is the first thing to check.
 - Both endpoints use the same **read-through cache** pattern as the watch-check: whoever's request finds a stale/missing cache entry pays the live-fetch cost and refills it for everyone else. The Cron Trigger (Step 2.5) also refreshes both every cycle so the *first* visitor after a gap doesn't wait on a live fetch. A failed fetch (Yahoo hiccup, bad response) is never cached as if it were real data — it's retried on the next request instead of getting stuck for the full TTL.
+- The **Refresh** button bypasses this cache on purpose — it sends `{ force: true }`, which skips the KV read (but still refills the cache with whatever comes back), so a tap always shows genuinely live index/news data instead of whatever was cached up to 6h/20m ago.
+
+## Earnings calendar
+
+The calendar icon (top right of the header, on every tab) opens a day-by-day earnings calendar — which companies are reporting, before/after market, with EPS and revenue estimates. Sourced from **EarningsWhispers'** public calendar API (`earningswhispers.com/api/caldata/<date>` — the same JSON endpoint their own `/calendar` page's frontend calls), which needs no key. Like the news RSS feed, it's unofficial and undocumented, so it's cached in KV per day for **3 hours** and degrades to an empty list (rather than breaking the modal) if the fetch fails. The list is capped to the day's ~30 most-watched tickers (by EarningsWhispers' own interest ranking) to keep the modal short. The Cron Trigger also pre-warms today's date every cycle, same as indices/news.
 
 ## Analyze tab
 
@@ -153,6 +158,16 @@ Practice mode with a virtual $100,000 starting balance, live prices, and long-on
 - **From the dashboard**: after analyzing a ticker, a "Paper trade this setup" button prefills the trade form with that ticker (and, for a favourable verdict, the suggested stop/target).
 - **Stop/target monitoring**: manual by default — tap "Refresh" on a position or "Refresh prices" to check. With notifications enabled (see below), the server also checks periodically and pushes an alert; tapping it re-fetches a fresh price and asks you to confirm the close (it never auto-closes on a possibly-stale push price).
 - **Reset**: "Reset portfolio" at the bottom of the Paper Trading tab wipes everything and starts over from $100,000.
+
+## Portfolio tab
+
+A real-holdings tracker — separate from Paper Trading's virtual $100,000 account. You enter stocks you actually own (ticker, shares, cost basis); it tracks live P&L against real prices. It never connects to a brokerage, moves money, or executes anything — it's a read-only tracker you update by hand.
+
+- **Storage**: `localStorage`, same as Paper Trading — holdings and watchlist never leave the device, no login, no sync.
+- **Holdings**: ticker, shares, and cost basis (entered as $/share or $ total — the app converts to $/share internally). Each entry is its own lot, so buying the same ticker at different times/prices doesn't get merged — add a second holding instead of editing the first if you want to track lots separately.
+- **Watchlist**: tickers you're tracking but don't own — just live price and day change, no shares/cost. Lives in the same tab as Holdings, not a separate one.
+- **Day change**: derived from the `/quote` endpoint's day-over-day % (same figure Markets/Analyze use) — the Worker doesn't return a $ figure, so the frontend backs into today's $ move per share from price and %.
+- **Prices**: fetched live via `/quote` on add, edit, or "Refresh prices" — never cached client-side across page loads (a fresh page load shows "tap refresh" until you do).
 
 ## Costs
 

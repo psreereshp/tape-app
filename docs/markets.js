@@ -47,7 +47,7 @@
       return `
         <div class="index-card">
           <div class="index-card-label">${esc(idx.label)}</div>
-          <div class="index-card-price">${idx.price != null ? `$${idx.price.toFixed(2)}` : "—"}</div>
+          <div class="index-card-price">${idx.price != null ? (idx.raw ? idx.price.toLocaleString(undefined, { maximumFractionDigits: 2 }) : `$${idx.price.toFixed(2)}`) : "—"}</div>
           <div class="index-card-change ${pnlClass}">${fmtPct(idx.changePercent)}</div>
           <div class="index-card-chart"><canvas id="sparkline${i}"></canvas></div>
           <div class="index-card-sub">via ${esc(idx.symbol)}</div>
@@ -118,7 +118,7 @@
           "content-type": "application/json",
           ...(cfg.APP_KEY ? { "X-App-Key": cfg.APP_KEY } : {}),
         },
-        body: "{}",
+        body: JSON.stringify({ force: !!force }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Request failed (${res.status}).`);

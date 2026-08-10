@@ -381,6 +381,9 @@ const INDEX_PROXIES = [
   { key: "sp500", label: "S&P 500", symbol: "SPY" },
   { key: "nasdaq", label: "Nasdaq", symbol: "QQQ" },
   { key: "dow", label: "Dow Jones", symbol: "DIA" },
+  { key: "russell2000", label: "Russell 2000", symbol: "^RUT", raw: true },
+  { key: "kospi", label: "KOSPI", symbol: "^KS11", raw: true },
+  { key: "sse", label: "SSE Composite", symbol: "000001.SS", raw: true },
 ];
 
 const INDICES_TTL_MS = 6 * 60 * 60 * 1000; // 6h — daily-close data doesn't need to refresh often
@@ -503,8 +506,73 @@ async function fetchNews() {
   }
 }
 
-async function getCached(env, key, ttlMs, refresh, isCacheable) {
-  if (env.WATCHLIST) {
+// ---------------------------------------------------------------------------
+// Earnings calendar — sourced from EarningsWhispers' public calendar API
+// (the same JSON endpoint their own /calendar page's frontend calls). It's
+// undocumented and unofficial like the Yahoo News RSS feed above, so it's
+// cached in KV and degrades to an empty list rather than breaking the page
+// if EarningsWhispers changes shape or blocks the request.
+// ---------------------------------------------------------------------------
+
+const EARNINGS_TTL_MS = 3 * 60 * 60 * 1000; // 3h — companies confirm/update dates throughout the day
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function releaseTimeLabel(rt) {
+  if (rt === 1) return "bmo"; // before market open
+  if (rt === 3) return "amc"; // after market close
+  return null;
+}
+
+function todayDateStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function fetchEarningsCalendar(dateStr) {
+  const ewDate = dateStr.replace(/-/g, "");
+  const url = `https://www.earningswhispers.com/api/caldata/${ewDate}`;
+  let json;
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": `https://www.earningswhispers.com/calendar/${ewDate}`,
+      },
+    });
+    if (!res.ok) return { date: dateStr, items: [], updatedAt: Date.now(), error: `EarningsWhispers error (${res.status}).` };
+    json = await res.json();
+  } catch (err) {
+    return { date: dateStr, items: [], updatedAt: Date.now(), error: err.message || "Network error." };
+  }
+
+  if (!Array.isArray(json)) return { date: dateStr, items: [], updatedAt: Date.now(), error: "Unexpected response shape." };
+
+  const items = json
+    .map((r) => ({
+      ticker: r.ticker,
+      company: r.company ? r.company.trim() : r.ticker,
+      releaseTime: releaseTimeLabel(r.releaseTime),
+      epsEstimate: r.q1EstEPS ?? null,
+      revenueEstimate: r.q1RevEst ?? null,
+      interest: r.total ?? 0,
+    }))
+    .sort((a, b) => b.interest - a.interest)
+    .slice(0, 30);
+
+  return { date: dateStr, items, updatedAt: Date.now() };
+}
+
+// A failed fetch is never cached as if it were real data (see indicesAreCacheable) —
+// but a *successful* empty list (weekends, holidays) is real data and should cache.
+function earningsAreCacheable(data) {
+  return !data.error;
+}
+
+async function getEarnings(env, dateStr) {
+  return getCached(env, `earnings:${dateStr}`, EARNINGS_TTL_MS, () => fetchEarningsCalendar(dateStr), earningsAreCacheable);
+}
+
+async function getCached(env, key, ttlMs, refresh, isCacheable, force) {
+  if (!force && env.WATCHLIST) {
     try {
       const raw = await env.WATCHLIST.get(key);
       if (raw) {
@@ -532,12 +600,12 @@ function indicesAreCacheable(data) {
   return Array.isArray(data.indices) && data.indices.some((i) => !i.error);
 }
 
-async function getIndices(env) {
-  return getCached(env, "market:indices", INDICES_TTL_MS, () => fetchIndices(), indicesAreCacheable);
+async function getIndices(env, force) {
+  return getCached(env, "market:indices", INDICES_TTL_MS, () => fetchIndices(), indicesAreCacheable, force);
 }
 
-async function getNews(env) {
-  return getCached(env, "market:news", NEWS_TTL_MS, fetchNews);
+async function getNews(env, force) {
+  return getCached(env, "market:news", NEWS_TTL_MS, fetchNews, undefined, force);
 }
 
 // ---------------------------------------------------------------------------
@@ -789,10 +857,21 @@ export default {
 
     if (path === "/market") {
       try {
-        const [indices, news] = await Promise.all([getIndices(env), getNews(env)]);
+        const force = payload.force === true;
+        const [indices, news] = await Promise.all([getIndices(env, force), getNews(env, force)]);
         return jsonResponse(200, { indices: indices.indices, indicesUpdatedAt: indices.updatedAt, news: news.items, newsUpdatedAt: news.updatedAt }, headers);
       } catch (err) {
         return errorResponse(500, err.message || "Couldn't load market data.", headers);
+      }
+    }
+
+    if (path === "/earnings") {
+      const dateStr = payload.date && DATE_RE.test(payload.date) ? payload.date : todayDateStr();
+      try {
+        const data = await getEarnings(env, dateStr);
+        return jsonResponse(200, data, headers);
+      } catch (err) {
+        return errorResponse(500, err.message || "Couldn't load the earnings calendar.", headers);
       }
     }
 
@@ -850,5 +929,7 @@ export default {
     ctx.waitUntil(runWatchCheck(env));
     ctx.waitUntil(getCached(env, "market:indices", 0, () => fetchIndices(), indicesAreCacheable).catch(() => {}));
     ctx.waitUntil(getCached(env, "market:news", 0, fetchNews).catch(() => {}));
+    const today = todayDateStr();
+    ctx.waitUntil(getCached(env, `earnings:${today}`, 0, () => fetchEarningsCalendar(today), earningsAreCacheable).catch(() => {}));
   },
 };

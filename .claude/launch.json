@@ -4,7 +4,7 @@
     {
       "name": "frontend-static",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8791", "--directory", "frontend"],
+      "runtimeArgs": ["-m", "http.server", "8791", "--directory", "docs"],
       "port": 8791
     }
   ]

@@ -276,24 +276,30 @@
     const $tabMarkets = document.getElementById("tabMarketsBtn");
     const $tabAnalyze = document.getElementById("tabAnalyzeBtn");
     const $tabPaper = document.getElementById("tabPaperBtn");
+    const $tabPortfolio = document.getElementById("tabPortfolioBtn");
     const $marketsView = document.getElementById("marketsView");
     const $analyzeView = document.getElementById("analyzeView");
     const $paperView = document.getElementById("paperView");
+    const $holdingsView = document.getElementById("holdingsView");
 
     function show(view) {
       $tabMarkets.classList.toggle("active", view === "markets");
       $tabAnalyze.classList.toggle("active", view === "analyze");
       $tabPaper.classList.toggle("active", view === "paper");
+      $tabPortfolio.classList.toggle("active", view === "portfolio");
       $marketsView.hidden = view !== "markets";
       $analyzeView.hidden = view !== "analyze";
       $paperView.hidden = view !== "paper";
+      $holdingsView.hidden = view !== "portfolio";
       if (view === "paper" && window.PaperTrading) window.PaperTrading.onShow();
       if (view === "markets" && window.Markets) window.Markets.onShow();
+      if (view === "portfolio" && window.Portfolio) window.Portfolio.onShow();
     }
 
     $tabMarkets.addEventListener("click", () => show("markets"));
     $tabAnalyze.addEventListener("click", () => show("analyze"));
     $tabPaper.addEventListener("click", () => show("paper"));
+    $tabPortfolio.addEventListener("click", () => show("portfolio"));
   })();
 
   // Register the service worker for push notifications (paper.js handles subscribing)
