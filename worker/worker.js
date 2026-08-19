@@ -463,7 +463,7 @@ async function callGemini(ticker, marketData, geminiKey) {
 // ---------------------------------------------------------------------------
 
 const INDEX_PROXIES = [
-  { key: "sp500", label: "S&P 500", symbol: "SPY" },
+  { key: "sp500", label: "S&P 500", symbol: "^GSPC", raw: true }, // the SPX index itself, not the SPY ETF
   { key: "nasdaq", label: "Nasdaq", symbol: "QQQ" },
   { key: "dow", label: "Dow Jones", symbol: "DIA" },
   { key: "russell2000", label: "Russell 2000", symbol: "^RUT", raw: true },
@@ -570,12 +570,22 @@ async function fetchIndexProxy(proxy) {
     asOf: latest ? latest.date : null,
     points,
     session: extendedQuote?.session || "regular",
-    extended: extendedQuote && price != null ? {
-      price: extendedQuote.price,
-      changePercent: ((extendedQuote.price - price) / price) * 100,
-      asOf: extendedQuote.asOf,
-    } : null,
+    extended: buildExtended(extendedQuote, price),
   };
+}
+
+// Some symbols (raw indices like ^GSPC, unlike their ETF proxies) don't
+// actually trade pre/post-market — Yahoo just echoes the last regular print
+// forever. A ~0 move means nothing really happened, so there's nothing
+// worth surfacing as an extended-hours line. Compares by percent, not an
+// exact price match — the daily and minute-interval endpoints return
+// slightly different float precision for the "same" value (e.g.
+// 7707.97998046875 vs 7707.98), so an exact-equality check would miss this.
+function buildExtended(extendedQuote, price) {
+  if (!extendedQuote || price == null) return null;
+  const changePercent = ((extendedQuote.price - price) / price) * 100;
+  if (Math.abs(changePercent) < 0.005) return null;
+  return { price: extendedQuote.price, changePercent, asOf: extendedQuote.asOf };
 }
 
 async function fetchIndices() {
