@@ -1035,6 +1035,10 @@ footer.disclaimer .prov {
   margin: 4px 2px 0;
 }
 
+.score-legend[hidden] {
+  display: none;
+}
+
 .info-btn {
   width: 16px;
   height: 16px;
