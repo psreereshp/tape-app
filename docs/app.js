@@ -199,6 +199,36 @@
       });
     }
 
+    const $chartWrap = document.querySelector(".chart-wrap");
+    if ($chartWrap && window.ChartModal && points.length >= 2) {
+      $chartWrap.classList.add("tappable");
+      $chartWrap.setAttribute("role", "button");
+      $chartWrap.setAttribute("tabindex", "0");
+      const openEnlarged = () => {
+        const up = !String(d.changePercent || "").trim().startsWith("-");
+        const pnlClass = up ? "pnl-pos" : "pnl-neg";
+        window.ChartModal.open({
+          title: d.ticker,
+          points: points.map((p) => ({ date: p.date, value: p.price })),
+          up,
+          formatValue: (v) => `$${Number(v).toFixed(2)}`,
+          metaHtml: `
+            <span class="index-chart-price">${esc(d.price)}</span>
+            <span class="index-chart-change ${pnlClass}">${esc(d.changePercent)}</span>
+            <span class="index-chart-sub">${esc(d.companyName || "")}</span>
+          `,
+          caption: `Tap or hover a point for its date and price · two fingers to compare two points · 52-week${d.chartApproximate ? " (approximate — sparse data)" : ""}, via ${d.provenance || "Yahoo Finance"}`,
+        });
+      };
+      $chartWrap.addEventListener("click", openEnlarged);
+      $chartWrap.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openEnlarged();
+        }
+      });
+    }
+
     const $paperTradeBtn = document.getElementById("paperTradeBtn");
     if ($paperTradeBtn && window.PaperTrading) {
       $paperTradeBtn.addEventListener("click", () => {
@@ -250,6 +280,12 @@
     } finally {
       $btn.disabled = false;
     }
+  }
+
+  // Registered before the plain Enter-to-analyze handler below, so a
+  // dropdown pick (see tickers.js) wins a shared Enter keypress.
+  if (window.TickerSearch) {
+    window.TickerSearch.attach($input, { anchor: $input.closest(".search-row") });
   }
 
   $btn.addEventListener("click", analyze);

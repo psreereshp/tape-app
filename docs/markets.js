@@ -8,6 +8,7 @@
   let loaded = false;
   let loading = false;
   const sparklineCharts = [];
+  let latestIndices = [];
 
   function esc(s) {
     return String(s ?? "").replace(/[&<>"']/g, (c) => ({
@@ -32,9 +33,32 @@
     return `${Math.round(diffHr / 24)}d ago`;
   }
 
+  function fmtValue(idx, value) {
+    if (value == null) return "—";
+    return idx.raw ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : `$${value.toFixed(2)}`;
+  }
+
+  function sessionTag(session) {
+    return session === "pre" ? "Pre-mkt" : "After hrs";
+  }
+
+  // Small line for pre/post-market movement — absent during regular hours
+  // or when the market's fully closed, since there's nothing extra to show.
+  function extendedLineHtml(idx) {
+    if (!idx.extended) return "";
+    const up = idx.extended.changePercent >= 0;
+    return `
+      <div class="index-card-extended ${up ? "pnl-pos" : "pnl-neg"}">
+        <span class="ext-tag">${esc(sessionTag(idx.session))}</span>
+        ${esc(fmtValue(idx, idx.extended.price))} ${esc(fmtPct(idx.extended.changePercent))}
+      </div>
+    `;
+  }
+
   function renderCards(indices) {
     sparklineCharts.forEach((c) => c.destroy());
     sparklineCharts.length = 0;
+    latestIndices = indices || [];
 
     if (!indices || indices.length === 0) {
       $cards.innerHTML = `<div class="empty-note">Market data isn't available right now.</div>`;
@@ -44,11 +68,13 @@
     $cards.innerHTML = indices.map((idx, i) => {
       const up = idx.changePercent != null && idx.changePercent >= 0;
       const pnlClass = idx.changePercent == null ? "" : up ? "pnl-pos" : "pnl-neg";
+      const canEnlarge = Array.isArray(idx.points) && idx.points.length >= 2;
       return `
-        <div class="index-card">
+        <div class="index-card${canEnlarge ? " tappable" : ""}" data-i="${i}"${canEnlarge ? ' role="button" tabindex="0"' : ""}>
           <div class="index-card-label">${esc(idx.label)}</div>
-          <div class="index-card-price">${idx.price != null ? (idx.raw ? idx.price.toLocaleString(undefined, { maximumFractionDigits: 2 }) : `$${idx.price.toFixed(2)}`) : "—"}</div>
+          <div class="index-card-price">${fmtValue(idx, idx.price)}</div>
           <div class="index-card-change ${pnlClass}">${fmtPct(idx.changePercent)}</div>
+          ${extendedLineHtml(idx)}
           <div class="index-card-chart"><canvas id="sparkline${i}"></canvas></div>
           <div class="index-card-sub">via ${esc(idx.symbol)}</div>
         </div>
@@ -80,6 +106,38 @@
           scales: { x: { display: false }, y: { display: false } },
         },
       }));
+    });
+  }
+
+  function defaultChartMeta(idx) {
+    const up = idx.changePercent == null || idx.changePercent >= 0;
+    const pnlClass = idx.changePercent == null ? "" : up ? "pnl-pos" : "pnl-neg";
+    const extUp = idx.extended && idx.extended.changePercent >= 0;
+    const extended = idx.extended ? `
+      <span class="index-chart-extended-row ${extUp ? "pnl-pos" : "pnl-neg"}">
+        <span class="ext-tag">${esc(sessionTag(idx.session))}</span>
+        ${esc(fmtValue(idx, idx.extended.price))} ${esc(fmtPct(idx.extended.changePercent))}
+      </span>
+    ` : "";
+    return `
+      <span class="index-chart-price">${esc(fmtValue(idx, idx.price))}</span>
+      <span class="index-chart-change ${pnlClass}">${esc(fmtPct(idx.changePercent))}</span>
+      <span class="index-chart-sub">via ${esc(idx.symbol)}</span>
+      ${extended}
+    `;
+  }
+
+  function openChartModal(i) {
+    const idx = latestIndices[i];
+    if (!idx || !window.ChartModal) return;
+    const up = idx.changePercent == null || idx.changePercent >= 0;
+    window.ChartModal.open({
+      title: idx.label,
+      points: (idx.points || []).map((p) => ({ date: p.date, value: p.close })),
+      up,
+      formatValue: (v) => fmtValue(idx, v),
+      metaHtml: defaultChartMeta(idx),
+      caption: "Tap or hover a point for its date and value · two fingers to compare two points · 6-month daily close, via Yahoo Finance",
     });
   }
 
@@ -136,6 +194,18 @@
   }
 
   $refreshBtn.addEventListener("click", () => load(true));
+
+  $cards.addEventListener("click", (e) => {
+    const card = e.target.closest(".index-card.tappable");
+    if (card) openChartModal(Number(card.dataset.i));
+  });
+  $cards.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const card = e.target.closest(".index-card.tappable");
+    if (!card) return;
+    e.preventDefault();
+    openChartModal(Number(card.dataset.i));
+  });
 
   window.Markets = {
     onShow: () => load(false),

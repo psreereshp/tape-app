@@ -269,6 +269,91 @@ function computeMACD(points, fast = 12, slow = 26, signalPeriod = 9) {
   }));
 }
 
+function sma(values, period) {
+  if (values.length < period) return null;
+  const slice = values.slice(-period);
+  return slice.reduce((a, b) => a + b, 0) / period;
+}
+
+// Deterministic technical score for the Market Map scan — no Gemini call,
+// so scanning a whole watchlist stays fast and free-tier-quota-free. Rules
+// mirror the plain-English logic the Analyze verdict uses (trend + momentum
+// + a MACD cross), just collapsed into a single 0-100 number instead of a
+// written narrative.
+function computeSignal(points, rsiSeries, macdSeries) {
+  if (!points || points.length < 30) return null;
+  const closes = points.map((p) => p.close);
+  const price = closes[closes.length - 1];
+  const sma20 = sma(closes, 20);
+  const sma50 = sma(closes, 50);
+  const rsi = rsiSeries && rsiSeries.length ? rsiSeries[rsiSeries.length - 1].rsi : null;
+  const macdLast = macdSeries && macdSeries.length ? macdSeries[macdSeries.length - 1] : null;
+  const macdPrev = macdSeries && macdSeries.length > 1 ? macdSeries[macdSeries.length - 2] : null;
+
+  let score = 50;
+  let reason = "Mixed signals — no strong trend or momentum edge right now.";
+
+  if (sma20 != null && sma50 != null) {
+    if (price > sma50 && sma20 > sma50) {
+      score += 20;
+      reason = "Price is trending above its 50-day average.";
+    } else if (price < sma50 && sma20 < sma50) {
+      score -= 20;
+      reason = "Price is trending below its 50-day average.";
+    }
+  }
+
+  if (macdLast && macdPrev) {
+    if (macdPrev.histogram <= 0 && macdLast.histogram > 0) {
+      score += 15;
+      reason = "MACD just crossed bullish.";
+    } else if (macdPrev.histogram >= 0 && macdLast.histogram < 0) {
+      score -= 15;
+      reason = "MACD just crossed bearish.";
+    } else if (macdLast.histogram > 0) {
+      score += 7;
+    } else if (macdLast.histogram < 0) {
+      score -= 7;
+    }
+  }
+
+  if (rsi != null) {
+    if (rsi >= 70) score += 5;
+    else if (rsi >= 50) score += 15;
+    else if (rsi <= 30) score -= 5;
+    else score -= 10;
+  }
+
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  const verdict = score >= 65 ? "favourable" : score <= 35 ? "unfavourable" : "neutral";
+  return { score, verdict, reason };
+}
+
+async function scanTicker(ticker) {
+  const daily = await fetchYahooChartFull(ticker, "6mo", "1d");
+  if (!daily || daily.points.length < 30) {
+    return { ticker, error: "Not enough price history." };
+  }
+  const latest = daily.points[daily.points.length - 1];
+  const prev = daily.points[daily.points.length - 2];
+  const changePercent = prev ? ((latest.close - prev.close) / prev.close) * 100 : null;
+  const rsiSeries = computeRSI(daily.points, 14);
+  const macdSeries = computeMACD(daily.points, 12, 26, 9);
+  const signal = computeSignal(daily.points, rsiSeries, macdSeries);
+  if (!signal) return { ticker, error: "Not enough price history." };
+
+  return {
+    ticker,
+    companyName: daily.meta?.longName || daily.meta?.shortName || ticker,
+    price: latest.close,
+    changePercent,
+    asOf: latest.date,
+    score: signal.score,
+    verdict: signal.verdict,
+    reason: signal.reason,
+  };
+}
+
 async function gatherMarketData(ticker) {
   const [daily, monthly, info] = await Promise.all([
     fetchYahooChartFull(ticker, "1y", "1d"),
@@ -386,21 +471,80 @@ const INDEX_PROXIES = [
   { key: "sse", label: "SSE Composite", symbol: "000001.SS", raw: true },
 ];
 
-const INDICES_TTL_MS = 6 * 60 * 60 * 1000; // 6h — daily-close data doesn't need to refresh often
+// 15m, not 6h — indices used to be daily-close-only so a stale cache didn't
+// matter much, but the extended-hours quote below is only useful if it's
+// actually recent. force:true (the Refresh button) still always bypasses
+// this and hits Yahoo live regardless of TTL.
+const INDICES_TTL_MS = 15 * 60 * 1000;
 const NEWS_TTL_MS = 20 * 60 * 1000; // 20m — cheap to refresh, no key or quota involved
 const YAHOO_NEWS_RSS_URL = "https://finance.yahoo.com/news/rssindex";
+
+// Yahoo's chart `meta.marketState` comes back null on this unofficial
+// endpoint, so the session is derived directly from `currentTradingPeriod`
+// (always present, in absolute epoch seconds — no timezone math needed).
+function deriveMarketSession(meta, nowSec) {
+  const tp = meta?.currentTradingPeriod;
+  if (!tp) return "regular";
+  if (tp.pre && nowSec >= tp.pre.start && nowSec < tp.pre.end) return "pre";
+  if (tp.regular && nowSec >= tp.regular.start && nowSec < tp.regular.end) return "regular";
+  if (tp.post && nowSec >= tp.post.start && nowSec < tp.post.end) return "post";
+  return "closed";
+}
+
+// Regular-session daily bars (fetchIndexProxy's main request) never include
+// pre/post-market ticks — Yahoo only surfaces those from a minute-interval
+// request with includePrePost=true. Returns null outside pre/post sessions
+// (nothing extra to show) or if the "extra" bar turns out to be stale data
+// left over from the regular session rather than a genuine pre/post tick.
+async function fetchExtendedQuote(symbol) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1m&includePrePost=true`;
+  let json;
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!res.ok) return null;
+    json = await res.json();
+  } catch {
+    return null;
+  }
+
+  const result = json?.chart?.result?.[0];
+  if (!result) return null;
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const session = deriveMarketSession(result.meta, nowSec);
+  if (session !== "pre" && session !== "post") return null;
+
+  const timestamps = result.timestamp || [];
+  const closes = result.indicators?.quote?.[0]?.close || [];
+  const bars = timestamps.map((t, i) => ({ t, close: closes[i] })).filter((b) => b.close != null);
+  if (bars.length === 0) return null;
+
+  const last = bars[bars.length - 1];
+  const win = result.meta.currentTradingPeriod?.[session];
+  if (win && (last.t < win.start || last.t >= win.end + 60)) return null; // stale, not a real pre/post tick
+
+  return { session, price: last.close, asOf: new Date(last.t * 1000).toISOString() };
+}
 
 // Alpha Vantage rate-limits by the calling Worker's shared egress IP, not the
 // API key — so no key (shared or personal) can unblock it from Cloudflare.
 // Yahoo Finance's public chart endpoint has no such issue (same as the news
 // feed below), so index prices are sourced from there instead.
 async function fetchIndexProxy(proxy) {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(proxy.symbol)}?range=1mo&interval=1d`;
+  // 6mo/1d gives enough history for the enlarged interactive chart in the
+  // Markets tab, not just the small sparkline — same fetch and KV cache
+  // entry serves both, so this doesn't add a second request or refresh.
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(proxy.symbol)}?range=6mo&interval=1d`;
   let json;
+  let extendedQuote;
   try {
-    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    const [res, extended] = await Promise.all([
+      fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } }),
+      fetchExtendedQuote(proxy.symbol),
+    ]);
     if (!res.ok) return { ...proxy, error: `Yahoo Finance error (${res.status}).` };
     json = await res.json();
+    extendedQuote = extended;
   } catch (err) {
     return { ...proxy, error: err.message || "Network error." };
   }
@@ -413,25 +557,29 @@ async function fetchIndexProxy(proxy) {
   const points = timestamps
     .map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: closes[i] }))
     .filter((p) => p.close != null)
-    .slice(-15);
+    .slice(-130);
   const latest = points[points.length - 1];
   const prev = points[points.length - 2];
+  const price = latest ? latest.close : result.meta?.regularMarketPrice ?? null;
   const changePercent = latest && prev ? ((latest.close - prev.close) / prev.close) * 100 : null;
 
   return {
     ...proxy,
-    price: latest ? latest.close : result.meta?.regularMarketPrice ?? null,
+    price,
     changePercent,
     asOf: latest ? latest.date : null,
     points,
+    session: extendedQuote?.session || "regular",
+    extended: extendedQuote && price != null ? {
+      price: extendedQuote.price,
+      changePercent: ((extendedQuote.price - price) / price) * 100,
+      asOf: extendedQuote.asOf,
+    } : null,
   };
 }
 
 async function fetchIndices() {
-  const indices = [];
-  for (const proxy of INDEX_PROXIES) {
-    indices.push(await fetchIndexProxy(proxy));
-  }
+  const indices = await Promise.all(INDEX_PROXIES.map((proxy) => fetchIndexProxy(proxy)));
   return { indices, updatedAt: Date.now() };
 }
 
@@ -853,6 +1001,22 @@ export default {
         return errorResponse(429, "Couldn't fetch a live price for that ticker right now. Try again shortly.", headers);
       }
       return jsonResponse(200, { ticker, ...q }, headers);
+    }
+
+    if (path === "/scan") {
+      const rawTickers = Array.isArray(payload.tickers) ? payload.tickers : [];
+      const tickers = [...new Set(rawTickers.map((t) => String(t).trim().toUpperCase()))]
+        .filter(isValidTicker)
+        .slice(0, 25);
+      if (tickers.length === 0) {
+        return errorResponse(400, "Provide at least one valid ticker.", headers);
+      }
+      try {
+        const results = await Promise.all(tickers.map((t) => scanTicker(t)));
+        return jsonResponse(200, { results, scannedAt: Date.now() }, headers);
+      } catch (err) {
+        return errorResponse(500, err.message || "Scan failed.", headers);
+      }
     }
 
     if (path === "/market") {

@@ -461,6 +461,11 @@
     if (e.target === $watchOverlay) closeWatchlistModal();
   });
 
+  if (window.TickerSearch) {
+    window.TickerSearch.attach($ticker);
+    window.TickerSearch.attach($watchTicker);
+  }
+
   render();
 
   window.Portfolio = {

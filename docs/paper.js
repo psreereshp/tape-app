@@ -496,6 +496,8 @@
     if (e.target === $overlay) closeModal();
   });
 
+  if (window.TickerSearch) window.TickerSearch.attach($tradeTicker);
+
   loadExistingSubscription();
   checkUrlTrigger();
   render();

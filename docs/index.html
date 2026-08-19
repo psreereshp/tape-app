@@ -65,15 +65,61 @@
     </section>
 
     <section id="analyzeView" hidden>
-      <div class="search-row">
-        <input id="tickerInput" type="text" placeholder="Ticker, e.g. NVDA" maxlength="10" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" />
-        <button id="analyzeBtn">Analyze</button>
+      <div class="subtab-row">
+        <button id="analyzeSubtabSingle" class="subtab-btn active" type="button">Single stock</button>
+        <button id="analyzeSubtabMap" class="subtab-btn" type="button">Market Map</button>
       </div>
-      <div class="hint">Swing-trade read: days-to-weeks technicals, trend, and sentiment — not a long-term thesis.</div>
 
-      <div id="status"></div>
+      <div id="singleStockView">
+        <div class="search-row">
+          <input id="tickerInput" type="text" placeholder="Ticker, e.g. NVDA" maxlength="10" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" />
+          <button id="analyzeBtn">Analyze</button>
+        </div>
+        <div class="hint">Swing-trade read: days-to-weeks technicals, trend, and sentiment — not a long-term thesis.</div>
 
-      <div id="dashboard"></div>
+        <div id="status"></div>
+
+        <div id="dashboard"></div>
+      </div>
+
+      <div id="marketMapView" hidden>
+        <div class="hint" style="margin-top:0;">Build a list of tickers, then scan them for a fast technical signal — trend, momentum, and a 0–100 strength score. Quicker and shallower than Analyze; tap a row to open its full dashboard.</div>
+
+        <div class="card">
+          <div class="section-row">
+            <div class="section-title">Your list</div>
+            <button id="mapSignalBtn" class="signal-btn" type="button" disabled title="Add a ticker to enable scanning">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z" fill="currentColor"/>
+              </svg>
+              Signal
+            </button>
+          </div>
+          <div class="search-row" style="margin-bottom:0;">
+            <input id="mapTickerInput" type="text" placeholder="Add a ticker or company…" maxlength="10" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" />
+            <button id="mapAddBtn" class="mini-btn" type="button">+ Add</button>
+          </div>
+          <div id="mapList" class="map-list"></div>
+        </div>
+
+        <div id="mapStatus" class="hint" style="margin:14px 0 0;"></div>
+
+        <div id="scoreLegend" class="score-legend" hidden>
+          <span>Score (0–100)</span>
+          <button id="scoreInfoBtn" class="info-btn" type="button" aria-label="How the score is calculated" aria-expanded="false">i</button>
+        </div>
+        <div id="scoreInfoPanel" class="score-info-panel" hidden>
+          <div>Rule-based, not AI — same checks run for every ticker, starting from a neutral 50:</div>
+          <ul>
+            <li><strong>Trend (±20):</strong> price and the 20-day average both above/below the 50-day average.</li>
+            <li><strong>MACD (±15 / ±7):</strong> a fresh bullish/bearish cross scores more than an already-positive/negative reading.</li>
+            <li><strong>RSI (+15 / +5 / −5 / −10):</strong> 50–70 scores best; ≥70 (overbought) and ≤30 (oversold) are capped lower.</li>
+          </ul>
+          <div>≥65 favourable · ≤35 unfavourable · in between neutral. Deeper read: tap any row to open its full Analyze dashboard.</div>
+        </div>
+
+        <div id="mapResults"></div>
+      </div>
     </section>
 
     <section id="paperView" hidden>
@@ -134,6 +180,22 @@
 
       <button id="resetWatchlistBtn" class="text-btn" type="button">Clear watchlist</button>
     </section>
+  </div>
+
+  <div id="indexChartModalOverlay" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <span id="indexChartModalTitle">Index</span>
+        <button id="indexChartModalClose" class="modal-close" aria-label="Close" type="button">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="indexChartMeta" class="index-chart-meta"></div>
+        <div class="index-chart-wrap">
+          <canvas id="indexChartCanvas" role="img" aria-label="Interactive price chart"></canvas>
+        </div>
+        <div id="indexChartCaption" class="chart-caption">Tap or hover a point for its date and value · two fingers to compare two points · 6-month daily close, via Yahoo Finance</div>
+      </div>
+    </div>
   </div>
 
   <div id="earningsModalOverlay" class="modal-overlay" hidden>
@@ -229,10 +291,13 @@
   </div>
 
   <script src="config.js"></script>
+  <script src="tickers.js"></script>
+  <script src="chartmodal.js"></script>
   <script src="app.js"></script>
   <script src="markets.js"></script>
   <script src="paper.js"></script>
   <script src="portfolio.js"></script>
   <script src="earnings.js"></script>
+  <script src="marketmap.js"></script>
 </body>
 </html>

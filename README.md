@@ -136,7 +136,9 @@ This powers two things: a phone notification the moment a paper position hits it
 
 The default landing view. Two independent pieces, cached separately:
 
-- **Indices**: S&P 500, Nasdaq, and Dow Jones are tracked via a liquid ETF proxy — **SPY**, **QQQ**, and **DIA** respectively (labeled "via SPY" etc. on each card, not presented as the literal index level — the % change is what's accurate and what matters for a market-pulse glance). Russell 2000, KOSPI, and SSE Composite are tracked as the literal index level instead (**^RUT**, **^KS11**, **000001.SS** — no liquid single-ticker US ETF tracks these closely enough), so their cards show the raw index value rather than a `$` price. Sourced from Yahoo Finance's public chart endpoint, cached in KV for **6 hours** — daily-close data doesn't need to refresh more often than that anyway.
+- **Indices**: S&P 500, Nasdaq, and Dow Jones are tracked via a liquid ETF proxy — **SPY**, **QQQ**, and **DIA** respectively (labeled "via SPY" etc. on each card, not presented as the literal index level — the % change is what's accurate and what matters for a market-pulse glance). Russell 2000, KOSPI, and SSE Composite are tracked as the literal index level instead (**^RUT**, **^KS11**, **000001.SS** — no liquid single-ticker US ETF tracks these closely enough), so their cards show the raw index value rather than a `$` price. Sourced from Yahoo Finance's public chart endpoint (6 months of daily closes per index), cached in KV for **15 minutes** — short enough that the pre/post-market read below (see next bullet) doesn't go stale for long between visits, while `force: true` (the Refresh button) always bypasses this and hits Yahoo live regardless.
+- **Pre-market / after-hours**: daily-close bars alone never carry pre/post-market moves — a bar's close is fixed the moment the regular session ends. So each index also gets a second, lightweight fetch (`interval=1m&includePrePost=true`) whenever the market is currently in a pre- or post-market session; the session itself is derived from Yahoo's `currentTradingPeriod` window (its own `marketState` field comes back empty on this unofficial endpoint, so it can't be trusted directly). When there's a genuine extended tick, a "Pre-mkt"/"After hrs" line appears under the main price and change — on the card, in the enlarged chart's header, computed against the regular-session price, not the prior day's close. Silently absent during regular hours or when markets are fully closed, since there's nothing extra to show.
+- **Tap a card to enlarge its chart**: opens an interactive Chart.js line chart in a modal — real date (X) and price (Y) axes, and tap/hover any point for its exact date and value. Two fingers at once compares two points instead: each gets its own crosshair, connected by a line, with a header summary like "Aug 3 → Aug 17 · +$15.00 (+1.98%) · 14d apart" — ordered by which point is earlier in time, not which finger touched down first. Same 6-month history that's already fetched and cached for the sparkline, just rendered bigger — no extra request, no leaving the app to check Yahoo Finance.
 - **News**: pulled from Yahoo Finance's public top-stories RSS feed (`finance.yahoo.com/news/rssindex`), parsed by the Worker, cached in KV for **20 minutes**. This is an unofficial, undocumented feed — Yahoo could change its shape or retire it without notice. The Worker's RSS parser is regex-based (Workers have no built-in XML DOM parser) and degrades gracefully: if the fetch or parse fails, the news list just renders empty rather than breaking the rest of the page. If headlines stop showing up, that feed is the first thing to check.
 - Both endpoints use the same **read-through cache** pattern as the watch-check: whoever's request finds a stale/missing cache entry pays the live-fetch cost and refills it for everyone else. The Cron Trigger (Step 2.5) also refreshes both every cycle so the *first* visitor after a gap doesn't wait on a live fetch. A failed fetch (Yahoo hiccup, bad response) is never cached as if it were real data — it's retried on the next request instead of getting stuck for the full TTL.
 - The **Refresh** button bypasses this cache on purpose — it sends `{ force: true }`, which skips the KV read (but still refills the cache with whatever comes back), so a tap always shows genuinely live index/news data instead of whatever was cached up to 6h/20m ago.
@@ -149,6 +151,8 @@ The calendar icon (top right of the header, on every tab) opens a day-by-day ear
 
 RSI(14) and MACD(12,26,9) are computed locally in the Worker from a year of Yahoo Finance daily price history — not fetched pre-computed from anywhere, so there's no external technical-indicators API to depend on. Company name/sector and ticker-specific headlines come from Yahoo Finance's search endpoint. There's no pre-scored sentiment feed; Gemini reads the raw headlines itself and writes the sentiment section directly from that (and says so plainly if no analyst-rating data is available, rather than guessing).
 
+The 52-week chart is tappable, same as the Markets tab's index charts — both share one modal and interaction (`docs/chartmodal.js`), so it's built and tested once rather than twice. Tap it for the same interactive view: real date/price axes, single-finger crosshair, and a two-finger compare that connects the two points with a delta summary ("Jun 2 → Aug 3 · -$16.18 (-7.26%) · 62d apart").
+
 ## Paper trading
 
 Practice mode with a virtual $100,000 starting balance, live prices, and long-only positions (buy, then close for a gain or loss — no shorting, matching the analysis skill's own long-only setups).
@@ -158,6 +162,28 @@ Practice mode with a virtual $100,000 starting balance, live prices, and long-on
 - **From the dashboard**: after analyzing a ticker, a "Paper trade this setup" button prefills the trade form with that ticker (and, for a favourable verdict, the suggested stop/target).
 - **Stop/target monitoring**: manual by default — tap "Refresh" on a position or "Refresh prices" to check. With notifications enabled (see below), the server also checks periodically and pushes an alert; tapping it re-fetches a fresh price and asks you to confirm the close (it never auto-closes on a possibly-stale push price).
 - **Reset**: "Reset portfolio" at the bottom of the Paper Trading tab wipes everything and starts over from $100,000.
+
+## Market Map
+
+A sub-tab inside Analyze ("Single stock" / "Market Map") for screening a self-curated list of tickers instead of analyzing one at a time.
+
+- **Your list**: add tickers via the same search-as-you-type box described below, capped at 25. Stored in `localStorage` (`tape_market_map_list`) — local to the device, like Paper Trading and Portfolio.
+- **The Signal button**: greyed out and disabled while the list is empty; lights up green the moment it holds at least one ticker. Tapping it calls the Worker's `/scan` endpoint with the current list and re-scans on demand — nothing runs automatically or in the background.
+- **Deterministic, not LLM-scored**: unlike Analyze, a scan never calls Gemini. The Worker fetches 6 months of daily price history per ticker and scores it locally — 50-day trend, a MACD cross, and RSI — into a 0–100 strength score and a favourable/neutral/unfavourable verdict, the same vocabulary Analyze uses. This is what keeps scanning a whole list fast (no 15–60s LLM wait per ticker) and free (no Gemini quota spent). It's intentionally shallower than Analyze — a triage pass, not the full dashboard.
+- **Bridges to Analyze**: each result has a "Full analysis →" link that switches back to Single stock, fills in that ticker, and runs the real Analyze dashboard.
+- **Scope limit**: `/scan` caps a single request at 25 tickers (matching the list cap) to keep one Worker invocation's Yahoo Finance fetches within Cloudflare's free-tier subrequest budget.
+
+## Ticker search
+
+Every ticker field (Analyze, new paper trade, watchlist, holdings) has a search-as-you-type dropdown — type a symbol or a company name and pick from the list instead of typing a raw ticker.
+
+- **Data**: `docs/tickers.json`, a flat `[symbol, name, exchange]` array covering NASDAQ/NYSE/AMEX (via `api.nasdaq.com`'s public screener) and TSX/TSXV (via `tsx.com`'s public company directory) — about 10,500 tickers, ~500KB. Canadian symbols already carry the suffix Yahoo Finance expects (`.TO` for TSX, `.V` for TSX Venture), so picking one from the dropdown produces a ticker the Worker's `/analyze` and `/quote` endpoints can resolve directly.
+- **Runs entirely client-side**: `docs/tickers.js` fetches that JSON once per page load and filters it in-browser on every keystroke — no per-keystroke network call, no Worker/KV involvement, works the moment the file is cached by the browser.
+- **It's a snapshot, not a live feed.** New listings, delistings, and ticker changes won't show up until you regenerate it:
+  ```bash
+  python3 scripts/build_tickers.py
+  ```
+  This overwrites `docs/tickers.json` — commit it like any other frontend asset. Nothing regenerates it automatically.
 
 ## Portfolio tab
 
