@@ -207,7 +207,10 @@
   // Registered before this plain Enter handler so a dropdown pick (see
   // tickers.js) wins a shared Enter keypress instead of both firing.
   if (window.TickerSearch) {
-    window.TickerSearch.attach($mapInput, { onSelect: (row) => addTicker(row[0]) });
+    window.TickerSearch.attach($mapInput, {
+      anchor: $mapInput.closest(".search-row"),
+      onSelect: (row) => addTicker(row[0]),
+    });
   }
   $mapInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
