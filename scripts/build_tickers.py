@@ -3,9 +3,15 @@
 Regenerates docs/tickers.json — the local ticker/company-name database
 that powers the search-as-you-type dropdown in the app.
 
-Sources (both free, no key, no signup):
-  - US (NASDAQ/NYSE/AMEX): api.nasdaq.com's public stock-screener endpoint.
-  - Canada (TSX/TSXV): tsx.com's public company-directory endpoint.
+Sources (all free, no key, no signup):
+  - US common stocks (NASDAQ/NYSE/AMEX): api.nasdaq.com's public stock-screener endpoint.
+  - US ETFs: api.nasdaq.com's separate ETF-screener endpoint — the stock
+    screener above doesn't include ETFs at all (SPY/QQQ/DIA/VOO/etc. are
+    absent from it regardless of query params), they live behind this
+    other endpoint instead.
+  - Canada (TSX/TSXV): tsx.com's public company-directory endpoint. This
+    one already includes Canadian-listed ETFs alongside regular companies,
+    so there's no separate Canadian ETF source needed.
 
 Output format is deliberately terse — a JSON array of 3-element arrays
 [symbol, name, exchange] — since this file ships to every visitor's
@@ -101,6 +107,26 @@ def fetch_us():
     return out
 
 
+def fetch_us_etfs():
+    out = []
+    seen = set()
+    url = "https://api.nasdaq.com/api/screener/etf?tableonly=true&limit=10000&offset=0&download=true"
+    data = fetch_json(url)
+    rows = ((data.get("data") or {}).get("data") or {}).get("rows") or []
+    for row in rows:
+        raw_symbol = (row.get("symbol") or "").strip()
+        name = (row.get("companyName") or "").strip()
+        if not raw_symbol or not name or "^" in raw_symbol:
+            continue
+        symbol = to_yahoo_symbol(raw_symbol)
+        if symbol in seen:
+            continue
+        seen.add(symbol)
+        out.append([symbol, name, "ETF"])
+    print(f"  ETF: {len(rows)} rows", file=sys.stderr)
+    return out
+
+
 def fetch_ca():
     out = []
     seen = set()
@@ -124,12 +150,20 @@ def fetch_ca():
 
 
 def main():
-    print("Fetching US listings (NASDAQ/NYSE/AMEX)...", file=sys.stderr)
+    print("Fetching US common stock listings (NASDAQ/NYSE/AMEX)...", file=sys.stderr)
     us = fetch_us()
+    print("Fetching US ETF listings...", file=sys.stderr)
+    us_etfs = fetch_us_etfs()
     print("Fetching Canadian listings (TSX/TSXV)...", file=sys.stderr)
     ca = fetch_ca()
 
-    combined = us + ca
+    combined = []
+    seen = set()
+    for row in us + us_etfs + ca:
+        if row[0] in seen:
+            continue
+        seen.add(row[0])
+        combined.append(row)
     combined.sort(key=lambda row: row[0])
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
