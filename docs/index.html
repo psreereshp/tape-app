@@ -68,6 +68,7 @@
       <div class="subtab-row">
         <button id="analyzeSubtabSingle" class="subtab-btn active" type="button">Single stock</button>
         <button id="analyzeSubtabMap" class="subtab-btn" type="button">Market Map</button>
+        <button id="analyzeSubtabScenario" class="subtab-btn" type="button">Scenario</button>
       </div>
 
       <div id="singleStockView">
@@ -119,6 +120,50 @@
         </div>
 
         <div id="mapResults"></div>
+      </div>
+
+      <div id="scenarioView" hidden>
+        <div class="hint" style="margin-top:0;">Backtest 2–3 tickers side by side: what a deposit made on a past date would be worth today, run independently per ticker — not split across a shared portfolio.</div>
+
+        <div class="card form-card">
+          <div class="section-title" style="margin-bottom:10px;">Tickers (pick 2 or 3)</div>
+          <label>Ticker 1
+            <input id="scenarioTicker1" type="text" placeholder="e.g. AAPL" maxlength="10" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" />
+          </label>
+          <label>Ticker 2
+            <input id="scenarioTicker2" type="text" placeholder="e.g. MSFT" maxlength="10" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" />
+          </label>
+          <label>Ticker 3 <span class="label-optional">(optional)</span>
+            <input id="scenarioTicker3" type="text" placeholder="e.g. QQQ" maxlength="10" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" />
+          </label>
+        </div>
+
+        <div class="card form-card">
+          <label>Investment date
+            <input id="scenarioStartDate" type="date" />
+          </label>
+          <label>Through
+            <input id="scenarioEndDate" type="date" />
+          </label>
+          <label>Amount deposited <span class="label-optional">(per ticker)</span>
+            <input id="scenarioAmount" type="number" min="0" step="0.01" placeholder="e.g. 10000" />
+          </label>
+
+          <label class="checkbox-row">
+            <input id="scenarioRecurringToggle" type="checkbox" />
+            Add a monthly recurring investment
+          </label>
+          <label id="scenarioRecurringRow" hidden>
+            $ per month <span class="label-optional">(added on the first trading day of each month)</span>
+            <input id="scenarioRecurringAmount" type="number" min="0" step="0.01" placeholder="e.g. 200" />
+          </label>
+
+          <div id="scenarioFormStatus" class="trade-modal-status"></div>
+          <button id="scenarioRunBtn" class="full-btn" type="button">Run Scenario</button>
+        </div>
+
+        <div id="scenarioStatus" class="hint" style="margin:14px 0 0;"></div>
+        <div id="scenarioResults"></div>
       </div>
     </section>
 
@@ -299,5 +344,6 @@
   <script src="portfolio.js"></script>
   <script src="earnings.js"></script>
   <script src="marketmap.js"></script>
+  <script src="scenario.js"></script>
 </body>
 </html>

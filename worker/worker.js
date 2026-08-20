@@ -354,6 +354,93 @@ async function scanTicker(ticker) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Scenario backtest — "what would $X invested in this ticker on this past
+// date be worth today", optionally with a recurring monthly top-up. Each
+// ticker is run as its own independent scenario (not a shared portfolio
+// split across tickers) — same deposit amount into each one, compared
+// side by side.
+// ---------------------------------------------------------------------------
+
+const BACKTEST_MIN_TICKERS = 2;
+const BACKTEST_MAX_TICKERS = 3;
+const BACKTEST_SERIES_CAP = 250;
+
+async function fetchHistoricalRange(symbol, period1, period2) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d`;
+  let json;
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!res.ok) return null;
+    json = await res.json();
+  } catch {
+    return null;
+  }
+  const result = json?.chart?.result?.[0];
+  if (!result) return null;
+  const timestamps = result.timestamp || [];
+  const closes = result.indicators?.quote?.[0]?.close || [];
+  return timestamps
+    .map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: closes[i] }))
+    .filter((p) => p.close != null);
+}
+
+// Evenly thins a series down to `cap` points for the response payload —
+// the backtest math itself still runs over every daily bar, this only
+// trims what gets sent back for the comparison chart.
+function downsample(points, cap) {
+  if (points.length <= cap) return points;
+  const step = points.length / cap;
+  const out = [];
+  for (let i = 0; i < cap; i++) out.push(points[Math.floor(i * step)]);
+  out.push(points[points.length - 1]);
+  return out;
+}
+
+function runBacktest(ticker, points, amount, recurringAmount) {
+  if (!points || points.length < 2) {
+    return { ticker, error: "Not enough price history for that date range." };
+  }
+
+  const startPrice = points[0].close;
+  const endPrice = points[points.length - 1].close;
+  let shares = amount / startPrice;
+  let totalInvested = amount;
+  let recurringContributions = 0;
+  let monthKey = points[0].date.slice(0, 7); // "YYYY-MM"
+
+  const series = [{ date: points[0].date, value: shares * points[0].close }];
+
+  for (let i = 1; i < points.length; i++) {
+    const thisMonthKey = points[i].date.slice(0, 7);
+    if (recurringAmount > 0 && thisMonthKey !== monthKey) {
+      // First trading day of a new calendar month -> make the recurring buy.
+      shares += recurringAmount / points[i].close;
+      totalInvested += recurringAmount;
+      recurringContributions++;
+      monthKey = thisMonthKey;
+    }
+    series.push({ date: points[i].date, value: shares * points[i].close });
+  }
+
+  const currentValue = shares * endPrice;
+  const gainLoss = currentValue - totalInvested;
+
+  return {
+    ticker,
+    startDate: points[0].date,
+    endDate: points[points.length - 1].date,
+    startPrice,
+    endPrice,
+    totalInvested,
+    currentValue,
+    gainLoss,
+    gainLossPercent: totalInvested ? (gainLoss / totalInvested) * 100 : null,
+    recurringContributions,
+    series: downsample(series, BACKTEST_SERIES_CAP),
+  };
+}
+
 async function gatherMarketData(ticker) {
   const [daily, monthly, info] = await Promise.all([
     fetchYahooChartFull(ticker, "1y", "1d"),
@@ -1026,6 +1113,50 @@ export default {
         return jsonResponse(200, { results, scannedAt: Date.now() }, headers);
       } catch (err) {
         return errorResponse(500, err.message || "Scan failed.", headers);
+      }
+    }
+
+    if (path === "/backtest") {
+      const rawTickers = Array.isArray(payload.tickers) ? payload.tickers : [];
+      const tickers = [...new Set(rawTickers.map((t) => String(t).trim().toUpperCase()))].filter(isValidTicker);
+      if (tickers.length < BACKTEST_MIN_TICKERS || tickers.length > BACKTEST_MAX_TICKERS) {
+        return errorResponse(400, `Choose between ${BACKTEST_MIN_TICKERS} and ${BACKTEST_MAX_TICKERS} tickers.`, headers);
+      }
+
+      const startDate = String(payload.startDate || "");
+      if (!DATE_RE.test(startDate)) {
+        return errorResponse(400, "Enter a valid investment date.", headers);
+      }
+      const endDate = payload.endDate && DATE_RE.test(payload.endDate) ? payload.endDate : todayDateStr();
+
+      const startTs = Math.floor(new Date(`${startDate}T00:00:00Z`).getTime() / 1000);
+      const nowTs = Math.floor(Date.now() / 1000);
+      const endTs = Math.min(Math.floor(new Date(`${endDate}T23:59:59Z`).getTime() / 1000), nowTs);
+      if (Number.isNaN(startTs) || startTs >= nowTs) {
+        return errorResponse(400, "Investment date must be in the past.", headers);
+      }
+      if (endTs <= startTs) {
+        return errorResponse(400, "The end date must be after the investment date.", headers);
+      }
+
+      const amount = Number(payload.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return errorResponse(400, "Enter a deposit amount greater than zero.", headers);
+      }
+
+      const recurringAmountRaw = payload.recurring?.amount;
+      const recurringAmount = Number.isFinite(Number(recurringAmountRaw)) && Number(recurringAmountRaw) > 0
+        ? Number(recurringAmountRaw)
+        : 0;
+
+      try {
+        const results = await Promise.all(tickers.map(async (ticker) => {
+          const points = await fetchHistoricalRange(ticker, startTs, endTs);
+          return runBacktest(ticker, points, amount, recurringAmount);
+        }));
+        return jsonResponse(200, { results, startDate, endDate }, headers);
+      } catch (err) {
+        return errorResponse(500, err.message || "Backtest failed.", headers);
       }
     }
 

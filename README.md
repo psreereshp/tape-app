@@ -170,8 +170,18 @@ A sub-tab inside Analyze ("Single stock" / "Market Map") for screening a self-cu
 - **Your list**: add tickers via the same search-as-you-type box described below, capped at 25. Stored in `localStorage` (`tape_market_map_list`) — local to the device, like Paper Trading and Portfolio.
 - **The Signal button**: greyed out and disabled while the list is empty; lights up green the moment it holds at least one ticker. Tapping it calls the Worker's `/scan` endpoint with the current list and re-scans on demand — nothing runs automatically or in the background.
 - **Deterministic, not LLM-scored**: unlike Analyze, a scan never calls Gemini. The Worker fetches 6 months of daily price history per ticker and scores it locally — 50-day trend, a MACD cross, and RSI — into a 0–100 strength score and a favourable/neutral/unfavourable verdict, the same vocabulary Analyze uses. This is what keeps scanning a whole list fast (no 15–60s LLM wait per ticker) and free (no Gemini quota spent). It's intentionally shallower than Analyze — a triage pass, not the full dashboard.
-- **Bridges to Analyze**: each result has a "Full analysis →" link that switches back to Single stock, fills in that ticker, and runs the real Analyze dashboard.
+- **Bridges to Analyze**: tapping any result row switches back to Single stock, fills in that ticker, and runs the real Analyze dashboard.
 - **Scope limit**: `/scan` caps a single request at 25 tickers (matching the list cap) to keep one Worker invocation's Yahoo Finance fetches within Cloudflare's free-tier subrequest budget.
+
+## Scenario
+
+A third sub-tab inside Analyze ("Single stock" / "Market Map" / "Scenario") for backtesting: what a deposit made on a past date would be worth today, for 2–3 tickers compared side by side.
+
+- **Each ticker runs independently**, not as a shared portfolio split across tickers — the same deposit amount goes into each one, so a $10,000 "Scenario" with 2 tickers compares two separate $10,000 what-ifs, not one $5,000-plus-$5,000 combined position.
+- **Optional recurring investment**: a fixed $ amount added on the first trading day of every month from the investment date onward, tracked as additional share purchases at that day's price — a simple dollar-cost-averaging simulation, not full XIRR/money-weighted-return math.
+- **Data**: the Worker's `/backtest` endpoint fetches exact-date-range daily history from Yahoo Finance (`period1`/`period2`, not the `range=` shorthand used elsewhere) for each ticker independently, buys at the first available trading day's close on/after the investment date, and sells (marks to market) at the last available close on/before the end date.
+- **Results**: sorted best-to-worst by gain/loss %, each card showing invested vs. current value, start/end price, gain/loss $, and how many recurring buys were made — plus a combined chart of portfolio value over time for all 2–3 tickers on the same $ axis, since they started with the same deposit.
+- **Scope limit**: 2–3 tickers per request, matching the "compare a few what-ifs side by side" scope — not a general-purpose multi-asset portfolio backtester.
 
 ## Ticker search
 

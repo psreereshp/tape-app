@@ -6,8 +6,10 @@
 
   const $subtabSingle = document.getElementById("analyzeSubtabSingle");
   const $subtabMap = document.getElementById("analyzeSubtabMap");
+  const $subtabScenario = document.getElementById("analyzeSubtabScenario");
   const $singleView = document.getElementById("singleStockView");
   const $mapView = document.getElementById("marketMapView");
+  const $scenarioView = document.getElementById("scenarioView");
 
   const $mapInput = document.getElementById("mapTickerInput");
   const $mapAddBtn = document.getElementById("mapAddBtn");
@@ -195,11 +197,16 @@
   function switchSubtab(which) {
     $subtabSingle.classList.toggle("active", which === "single");
     $subtabMap.classList.toggle("active", which === "map");
+    $subtabScenario.classList.toggle("active", which === "scenario");
     $singleView.hidden = which !== "single";
     $mapView.hidden = which !== "map";
+    $scenarioView.hidden = which !== "scenario";
   }
 
+  window.AnalyzeSubtabs = { show: switchSubtab };
+
   $subtabSingle.addEventListener("click", () => switchSubtab("single"));
+  $subtabScenario.addEventListener("click", () => switchSubtab("scenario"));
   $subtabMap.addEventListener("click", () => switchSubtab("map"));
 
   $mapAddBtn.addEventListener("click", () => addTicker($mapInput.value));

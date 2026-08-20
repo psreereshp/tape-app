@@ -1247,3 +1247,139 @@ footer.disclaimer .prov {
   color: var(--text-faint);
   white-space: normal;
 }
+
+/* Scenario */
+
+.form-card label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 14px;
+}
+
+.form-card label[hidden] {
+  display: none;
+}
+
+.form-card label:last-of-type {
+  margin-bottom: 0;
+}
+
+.form-card input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 11px 12px;
+  border-radius: 9px;
+  font-size: 15px;
+}
+
+.label-optional {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+.checkbox-row {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-row input {
+  display: inline-block !important;
+  width: auto !important;
+  margin-top: 0 !important;
+}
+
+#scenarioFormStatus:empty {
+  display: none;
+}
+
+#scenarioRunBtn {
+  margin-top: 16px;
+}
+
+.scenario-result-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+.scenario-result-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.scenario-result-symbol {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.scenario-result-name {
+  font-size: 12px;
+  color: var(--text-faint);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scenario-result-gain {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.scenario-result-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.scenario-stat .s-label {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.scenario-stat .s-value {
+  font-size: 13px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.scenario-chart-wrap {
+  position: relative;
+  height: 260px;
+  margin: 16px 0 8px;
+}
+
+.scenario-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.scenario-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.scenario-legend-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
