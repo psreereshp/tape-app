@@ -465,7 +465,7 @@ async function callGemini(ticker, marketData, geminiKey) {
 const INDEX_PROXIES = [
   { key: "sp500", label: "S&P 500", symbol: "^GSPC", raw: true }, // the SPX index itself, not the SPY ETF
   { key: "nasdaq", label: "Nasdaq", symbol: "^IXIC", raw: true }, // the Nasdaq Composite itself, not the QQQ ETF
-  { key: "dow", label: "Dow Jones", symbol: "DIA" },
+  { key: "dow", label: "Dow Jones", symbol: "^DJI", raw: true }, // the Dow itself, not the DIA ETF
   { key: "russell2000", label: "Russell 2000", symbol: "^RUT", raw: true },
   { key: "kospi", label: "KOSPI", symbol: "^KS11", raw: true },
   { key: "sse", label: "SSE Composite", symbol: "000001.SS", raw: true },
