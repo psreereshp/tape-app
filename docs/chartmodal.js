@@ -7,6 +7,7 @@
   const $overlay = document.getElementById("indexChartModalOverlay");
   const $close = document.getElementById("indexChartModalClose");
   const $title = document.getElementById("indexChartModalTitle");
+  const $badge = document.getElementById("indexChartBadge");
   const $meta = document.getElementById("indexChartMeta");
   const $canvas = document.getElementById("indexChartCanvas");
   const $caption = document.getElementById("indexChartCaption");
@@ -39,7 +40,7 @@
     const { ctx, chartArea, scales } = c;
 
     ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.strokeStyle = "rgba(27,36,32,0.3)";
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
@@ -79,10 +80,10 @@
 
       const active = c.getActiveElements();
       if (active && active.length) {
-        points.push({ x: active[0].element.x, y: active[0].element.y, index: active[0].index, color: "#4f8cff" });
+        points.push({ x: active[0].element.x, y: active[0].element.y, index: active[0].index, color: "#2F6E52" });
       }
       if (touchState.second) {
-        points.push({ ...touchState.second, color: "#f59e0b" });
+        points.push({ ...touchState.second, color: "#8C5F1E" });
       }
 
       points.forEach((p) => {
@@ -101,7 +102,7 @@
       if (points.length === 2) {
         const { ctx } = c;
         ctx.save();
-        ctx.strokeStyle = "#a78bfa";
+        ctx.strokeStyle = "#6B4A82";
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(points[0].x, points[0].y);
@@ -193,11 +194,15 @@
     touchState.second = null;
 
     $title.textContent = config.title;
+    if ($badge) {
+      $badge.textContent = config.badgeText || config.title;
+      $badge.className = `chart-badge sm ${config.up ? "up" : "down"}`;
+    }
     $meta.innerHTML = config.metaHtml;
     if (config.caption) $caption.textContent = config.caption;
 
-    const color = config.up ? "#22c55e" : "#ef4444";
-    const bg = config.up ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)";
+    const color = config.up ? "#2F6E52" : "#A23D26";
+    const colorRgb = config.up ? "47,110,82" : "162,61,38";
 
     if (chart) chart.destroy();
     chart = new Chart($canvas, {
@@ -207,12 +212,19 @@
         datasets: [{
           data: config.points.map((p) => p.value),
           borderColor: color,
-          backgroundColor: bg,
+          backgroundColor: (ctx) => {
+            const { chartArea, ctx: c } = ctx.chart;
+            if (!chartArea) return null;
+            const gradient = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+            gradient.addColorStop(0, `rgba(${colorRgb},0.3)`);
+            gradient.addColorStop(1, `rgba(${colorRgb},0)`);
+            return gradient;
+          },
           borderWidth: 2,
           pointRadius: 0,
           pointHoverRadius: 4,
           pointHitRadius: 12,
-          tension: 0.25,
+          tension: 0.3,
           fill: true,
         }],
       },
@@ -235,7 +247,7 @@
             display: true,
             grid: { display: false },
             ticks: {
-              color: "#66727f",
+              color: "#8B9187",
               maxTicksLimit: 6,
               autoSkip: true,
               callback: function (value) {
@@ -243,15 +255,7 @@
               },
             },
           },
-          y: {
-            display: true,
-            position: "right",
-            grid: { color: "rgba(255,255,255,0.06)" },
-            ticks: {
-              color: "#66727f",
-              callback: (value) => current.formatValue(value),
-            },
-          },
+          y: { display: false },
         },
       },
     });

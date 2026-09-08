@@ -34,6 +34,8 @@
   function renderDashboard(d) {
     const lit = verdictBeaconClasses(d.verdict);
     const entryProminent = d.verdict === "favourable";
+    const up = !String(d.changePercent || "").trim().startsWith("-");
+    const badgeText = String(d.ticker || "").length > 4 ? String(d.ticker).slice(0, 4) : d.ticker;
 
     const tilesHtml = `
       <div class="tiles">
@@ -125,9 +127,12 @@
     $dashboard.innerHTML = `
       <div class="card">
         <div class="ticker-header">
-          <div>
-            <div class="symbol">${esc(d.ticker)}</div>
-            <div class="name">${esc(d.companyName)}</div>
+          <div class="ticker-id">
+            <span class="chart-badge ${up ? "up" : "down"}">${esc(badgeText)}</span>
+            <div>
+              <div class="symbol">${esc(d.ticker)}</div>
+              <div class="name">${esc(d.companyName)}</div>
+            </div>
           </div>
           <div class="price">
             <div class="p">${esc(d.price)}</div>
@@ -174,17 +179,26 @@
     const points = Array.isArray(d.chartPoints) ? d.chartPoints : [];
     const ctx = document.getElementById("priceChart");
     if (ctx && points.length) {
+      const colorRgb = up ? "47,110,82" : "162,61,38";
       chartInstance = new Chart(ctx, {
         type: "line",
         data: {
           labels: points.map((p) => p.date),
           datasets: [{
             data: points.map((p) => p.price),
-            borderColor: "#4f8cff",
+            borderColor: up ? "#2F6E52" : "#A23D26",
+            backgroundColor: (c) => {
+              const { chartArea, ctx: cv } = c.chart;
+              if (!chartArea) return null;
+              const gradient = cv.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+              gradient.addColorStop(0, `rgba(${colorRgb},0.3)`);
+              gradient.addColorStop(1, `rgba(${colorRgb},0)`);
+              return gradient;
+            },
             borderWidth: 2,
             pointRadius: 0,
-            tension: 0.25,
-            fill: false,
+            tension: 0.3,
+            fill: true,
           }],
         },
         options: {
@@ -192,7 +206,23 @@
           maintainAspectRatio: false,
           plugins: { legend: { display: false }, tooltip: { enabled: true } },
           scales: {
-            x: { display: false },
+            x: {
+              display: true,
+              grid: { display: false },
+              ticks: {
+                color: "#8B9187",
+                maxTicksLimit: 5,
+                autoSkip: true,
+                font: { size: 10 },
+                callback: function (value) {
+                  const raw = this.getLabelForValue(value);
+                  const dt = new Date(`${raw}T00:00:00Z`);
+                  return Number.isNaN(dt.getTime())
+                    ? raw
+                    : dt.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+                },
+              },
+            },
             y: { display: false },
           },
         },
@@ -205,17 +235,17 @@
       $chartWrap.setAttribute("role", "button");
       $chartWrap.setAttribute("tabindex", "0");
       const openEnlarged = () => {
-        const up = !String(d.changePercent || "").trim().startsWith("-");
         const pnlClass = up ? "pnl-pos" : "pnl-neg";
         window.ChartModal.open({
-          title: d.ticker,
+          title: d.companyName || d.ticker,
+          badgeText,
           points: points.map((p) => ({ date: p.date, value: p.price })),
           up,
           formatValue: (v) => `$${Number(v).toFixed(2)}`,
           metaHtml: `
             <span class="index-chart-price">${esc(d.price)}</span>
             <span class="index-chart-change ${pnlClass}">${esc(d.changePercent)}</span>
-            <span class="index-chart-sub">${esc(d.companyName || "")}</span>
+            <span class="index-chart-sub">${esc(d.ticker || "")}</span>
           `,
           caption: `Tap or hover a point for its date and price · two fingers to compare two points · 52-week${d.chartApproximate ? " (approximate — sparse data)" : ""}, via ${d.provenance || "Yahoo Finance"}`,
         });

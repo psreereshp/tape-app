@@ -4,6 +4,7 @@
   const $updated = document.getElementById("marketsUpdated");
   const $news = document.getElementById("newsList");
   const $refreshBtn = document.getElementById("marketsRefreshBtn");
+  const $tape = document.getElementById("tickerTapeTrack");
 
   let loaded = false;
   let loading = false;
@@ -42,6 +43,21 @@
     return session === "pre" ? "Pre-mkt" : "After hrs";
   }
 
+  const BADGE_TEXT = {
+    "S&P 500": "500",
+    "NASDAQ": "IXIC",
+    "DOW JONES": "DJI",
+    "RUSSELL 2000": "2000",
+    "KOSPI": "KS11",
+    "SSE COMPOSITE": "SSE",
+  };
+
+  function badgeText(idx) {
+    const known = BADGE_TEXT[(idx.label || "").toUpperCase()];
+    if (known) return known;
+    return String(idx.symbol || idx.label || "").replace(/^\^/, "").slice(0, 4).toUpperCase();
+  }
+
   // Small line for pre/post-market movement — absent during regular hours
   // or when the market's fully closed, since there's nothing extra to show.
   function extendedLineHtml(idx) {
@@ -55,10 +71,30 @@
     `;
   }
 
+  function renderTickerTape(indices) {
+    if (!$tape) return;
+    if (!indices || !indices.length) {
+      $tape.innerHTML = "";
+      return;
+    }
+    const itemHtml = (idx) => {
+      const known = idx.changePercent != null && !Number.isNaN(idx.changePercent);
+      const up = known && idx.changePercent >= 0;
+      const cls = known ? (up ? "tt-up" : "tt-down") : "";
+      const arrow = known ? (up ? "▲" : "▼") : "";
+      return `<span class="ticker-tape-item"><span class="tt-symbol">${esc(idx.label)}</span><span>${esc(fmtValue(idx, idx.price))}</span><span class="${cls}">${arrow} ${esc(fmtPct(idx.changePercent))}</span></span>`;
+    };
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const set = indices.map(itemHtml).join("");
+    $tape.innerHTML = reduced ? set : set + set;
+    $tape.classList.toggle("no-motion", reduced);
+  }
+
   function renderCards(indices) {
     sparklineCharts.forEach((c) => c.destroy());
     sparklineCharts.length = 0;
     latestIndices = indices || [];
+    renderTickerTape(indices);
 
     if (!indices || indices.length === 0) {
       $cards.innerHTML = `<div class="empty-note">Market data isn't available right now.</div>`;
@@ -85,17 +121,26 @@
       const ctx = document.getElementById(`sparkline${i}`);
       if (!ctx || !Array.isArray(idx.points) || idx.points.length < 2) return;
       const up = idx.changePercent == null || idx.changePercent >= 0;
+      const colorRgb = up ? "47,110,82" : "162,61,38";
       sparklineCharts.push(new Chart(ctx, {
         type: "line",
         data: {
           labels: idx.points.map((p) => p.date),
           datasets: [{
             data: idx.points.map((p) => p.close),
-            borderColor: up ? "#22c55e" : "#ef4444",
+            borderColor: up ? "#2F6E52" : "#A23D26",
+            backgroundColor: (c) => {
+              const { chartArea, ctx: cv } = c.chart;
+              if (!chartArea) return null;
+              const gradient = cv.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+              gradient.addColorStop(0, `rgba(${colorRgb},0.28)`);
+              gradient.addColorStop(1, `rgba(${colorRgb},0)`);
+              return gradient;
+            },
             borderWidth: 1.5,
             pointRadius: 0,
             tension: 0.3,
-            fill: false,
+            fill: true,
           }],
         },
         options: {
@@ -133,6 +178,7 @@
     const up = idx.changePercent == null || idx.changePercent >= 0;
     window.ChartModal.open({
       title: idx.label,
+      badgeText: badgeText(idx),
       points: (idx.points || []).map((p) => ({ date: p.date, value: p.close })),
       up,
       formatValue: (v) => fmtValue(idx, v),

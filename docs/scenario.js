@@ -1,7 +1,7 @@
 (function () {
   const cfg = window.SWING_TRADE_CONFIG || {};
   const TICKER_RE = /^[A-Z.\-]{1,10}$/;
-  const LEGEND_COLORS = ["#4f8cff", "#22c55e", "#a78bfa"];
+  const LEGEND_COLORS = ["#2F6E52", "#8C5F1E", "#6B4A82"];
 
   const $t1 = document.getElementById("scenarioTicker1");
   const $t2 = document.getElementById("scenarioTicker2");
@@ -183,7 +183,7 @@
           borderWidth: 2,
           pointRadius: 0,
           pointHoverRadius: 4,
-          tension: 0.2,
+          tension: 0.3,
           fill: false,
         })),
       },
@@ -204,13 +204,13 @@
           x: {
             display: true,
             grid: { display: false },
-            ticks: { color: "#66727f", maxTicksLimit: 6, autoSkip: true, callback: function (v) { return formatTickDate(this.getLabelForValue(v)); } },
+            ticks: { color: "#8B9187", maxTicksLimit: 6, autoSkip: true, callback: function (v) { return formatTickDate(this.getLabelForValue(v)); } },
           },
           y: {
             display: true,
             position: "right",
-            grid: { color: "rgba(255,255,255,0.06)" },
-            ticks: { color: "#66727f", callback: (v) => fmtMoney(v) },
+            grid: { display: false },
+            ticks: { color: "#8B9187", callback: (v) => fmtMoney(v) },
           },
         },
       },
