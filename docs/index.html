@@ -43,6 +43,12 @@
           <path d="M14.5 10H18V13.5" stroke="var(--green)" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </button>
+      <button id="settingsBtn" class="header-icon-btn" aria-label="Settings" type="button">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="3.25" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M12 3.5V6M12 18V20.5M20.5 12H18M6 12H3.5M17.8 6.2L16 8M8 16L6.2 17.8M17.8 17.8L16 16M8 8L6.2 6.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </button>
     </header>
 
     <div id="iosTip" class="ios-tip">
@@ -85,6 +91,7 @@
           <button id="analyzeBtn">Analyze</button>
         </div>
         <div class="hint">Swing-trade read: days-to-weeks technicals, trend, and sentiment — not a long-term thesis.</div>
+        <div id="analyzeKeyNote" class="hint key-note" hidden></div>
 
         <div id="status"></div>
 
@@ -346,7 +353,32 @@
     </div>
   </div>
 
+  <div id="settingsModalOverlay" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <span>Settings</span>
+        <button id="settingsModalClose" class="modal-close" aria-label="Close" type="button">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="section-title" style="margin-bottom:6px;">Your Gemini API key</div>
+        <p class="hint" style="margin:0 0 12px;">
+          Analyze runs on Google Gemini. Bring your own free key so your usage draws on your own quota instead of the shared one — get one at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">aistudio.google.com/apikey</a> (no card required). Stored only on this device, never on our server.
+        </p>
+        <label>Gemini API key
+          <div class="amount-row">
+            <input id="geminiKeyInput" type="password" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Paste your key" />
+            <button id="geminiKeyToggle" class="mini-btn" type="button">Show</button>
+          </div>
+        </label>
+        <div id="geminiKeyStatus" class="trade-modal-status"></div>
+        <button id="geminiKeySaveBtn" class="full-btn" type="button">Save key</button>
+        <button id="geminiKeyRemoveBtn" class="text-btn" type="button" hidden>Remove key &amp; use the shared one</button>
+      </div>
+    </div>
+  </div>
+
   <script src="config.js?v=2"></script>
+  <script src="settings.js?v=2"></script>
   <script src="tickers.js?v=2"></script>
   <script src="chartmodal.js?v=2"></script>
   <script src="app.js?v=2"></script>

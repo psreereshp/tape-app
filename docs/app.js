@@ -287,13 +287,14 @@
     setStatus(`<span class="spinner"></span>Pulling technicals, history, and sentiment for ${esc(ticker)}… this can take 15–60s.`);
 
     try {
+      const userKey = window.getUserGeminiKey ? window.getUserGeminiKey() : null;
       const res = await fetch(`${cfg.API_URL}/analyze`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
           ...(cfg.APP_KEY ? { "X-App-Key": cfg.APP_KEY } : {}),
         },
-        body: JSON.stringify({ ticker }),
+        body: JSON.stringify({ ticker, ...(userKey ? { geminiKey: userKey } : {}) }),
       });
 
       const data = await res.json();

@@ -88,6 +88,11 @@
     const set = indices.map(itemHtml).join("");
     $tape.innerHTML = reduced ? set : set + set;
     $tape.classList.toggle("no-motion", reduced);
+    if (!reduced) {
+      const halfWidth = $tape.scrollWidth / 2;
+      const pxPerSecond = 55;
+      $tape.style.animationDuration = `${Math.max(8, halfWidth / pxPerSecond)}s`;
+    }
   }
 
   function renderCards(indices) {

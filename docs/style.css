@@ -268,6 +268,12 @@ header.app-header .app-header-text {
   margin: -10px 0 20px;
 }
 
+.hint.key-note {
+  color: var(--green);
+  font-weight: 600;
+  margin-top: -16px;
+}
+
 .ticker-dropdown {
   margin: 6px 0 0;
   background: var(--panel-2);
@@ -734,6 +740,10 @@ footer.disclaimer .prov {
   font-size: 12px;
   text-decoration: underline;
   cursor: pointer;
+}
+
+.text-btn[hidden] {
+  display: none;
 }
 
 .empty-note {

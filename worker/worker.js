@@ -1069,8 +1069,12 @@ export default {
     }
 
     if (path === "/analyze") {
-      if (!env.GEMINI_API_KEY) {
-        return errorResponse(500, "Server is missing API keys. Set GEMINI_API_KEY in the Worker's Settings > Variables.", headers);
+      // A user's own key (BYOK) always wins when present, so their usage
+      // draws on their own Gemini quota/plan instead of the shared one.
+      const userKey = typeof payload.geminiKey === "string" ? payload.geminiKey.trim() : "";
+      const geminiKey = userKey || env.GEMINI_API_KEY;
+      if (!geminiKey) {
+        return errorResponse(500, "Server is missing API keys. Set GEMINI_API_KEY in the Worker's Settings > Variables, or bring your own key in Settings.", headers);
       }
       const ticker = String(payload.ticker || "").trim().toUpperCase();
       if (!isValidTicker(ticker)) {
@@ -1081,10 +1085,11 @@ export default {
         if (marketData.error) {
           return errorResponse(404, marketData.error, headers);
         }
-        const dashboard = await callGemini(ticker, marketData, env.GEMINI_API_KEY);
+        const dashboard = await callGemini(ticker, marketData, geminiKey);
         return jsonResponse(200, dashboard, headers);
       } catch (err) {
-        return errorResponse(500, err.message || "Something went wrong.", headers);
+        const prefix = userKey ? "Your Gemini key: " : "";
+        return errorResponse(500, prefix + (err.message || "Something went wrong."), headers);
       }
     }
 
