@@ -1115,6 +1115,379 @@ async function runWatchCheck(env) {
 }
 
 // ---------------------------------------------------------------------------
+// Static "what's new" page for testers — served straight from this Worker
+// (GET /release-notes) so the link is on the same domain as the app's own
+// backend, not a separate host. Plain HTML, no build step, same spirit as
+// the rest of this file.
+// ---------------------------------------------------------------------------
+
+const RELEASE_NOTES_HTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tape Release Notes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,600;1,500;1,600&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --paper: #F3F1EA;
+    --card: #FAF8F1;
+    --card-2: #EAE6D9;
+    --line: #DDD8C8;
+    --ink: #1B2420;
+    --ink-dim: #57635B;
+    --ink-faint: #8B9187;
+    --moss: #2F6E52;
+    --rust: #A23D26;
+    --gold: #8C5F1E;
+    --gold-tint: rgba(140,95,30,0.08);
+
+    --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+    --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .tape {
+    background: var(--ink);
+    color: var(--paper);
+    overflow: hidden;
+    white-space: nowrap;
+    position: relative;
+    padding: 9px 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.02em;
+  }
+  .tape::before, .tape::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0;
+    height: 2px;
+    background-image: radial-gradient(circle, rgba(243,241,234,0.4) 1px, transparent 1.4px);
+    background-size: 9px 2px;
+  }
+  .tape::before { top: 0; }
+  .tape::after { bottom: 0; }
+  .tape-track {
+    display: inline-flex;
+    align-items: baseline;
+    animation: tape-scroll 26s linear infinite;
+  }
+  @keyframes tape-scroll {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+  .tape-item {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 7px;
+    padding: 0 18px;
+    border-right: 1px solid rgba(243,241,234,0.18);
+  }
+  .tape-item b { color: #8FCBA8; font-weight: 700; }
+  @media (prefers-reduced-motion: reduce) {
+    .tape-track { animation: none; }
+  }
+
+  .wrap {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: 40px 24px 64px;
+  }
+
+  header.masthead {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 8px;
+  }
+  header.masthead .mark { width: 40px; height: 40px; flex: 0 0 auto; }
+  header.masthead .id { flex: 1; min-width: 0; }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--moss);
+    margin-bottom: 2px;
+  }
+  header.masthead h1 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 30px;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  .release-tag {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+    white-space: nowrap;
+  }
+
+  .intro {
+    font-size: 16px;
+    color: var(--ink-dim);
+    margin: 20px 0 40px;
+    max-width: 54ch;
+  }
+
+  section.entry {
+    border-top: 1px solid var(--line);
+    padding: 28px 0;
+  }
+
+  .entry-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 8px;
+  }
+
+  section.entry h2 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 22px;
+    margin: 0 0 10px;
+    text-wrap: balance;
+  }
+
+  section.entry p {
+    margin: 0 0 12px;
+    color: var(--ink-dim);
+    max-width: 58ch;
+  }
+  section.entry p:last-child { margin-bottom: 0; }
+
+  .speed-compare {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 16px;
+    padding: 16px;
+    background: var(--card-2);
+    border-radius: 10px;
+    flex-wrap: wrap;
+  }
+  .speed-figure { display: flex; flex-direction: column; gap: 2px; }
+  .speed-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-faint);
+  }
+  .speed-value {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 18px;
+    font-variant-numeric: tabular-nums;
+  }
+  .speed-value.before { color: var(--rust); }
+  .speed-value.after { color: var(--moss); }
+  .speed-arrow {
+    color: var(--ink-faint);
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .action-card {
+    background: var(--gold-tint);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 20px;
+    margin-top: 16px;
+  }
+  .action-card .steps {
+    margin: 14px 0 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: step;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .action-card .steps li {
+    counter-increment: step;
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    font-size: 15px;
+    color: var(--ink);
+  }
+  .action-card .steps li .step-text {
+    flex: 1;
+    min-width: 0;
+  }
+  .action-card .steps li::before {
+    content: counter(step);
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 12px;
+    color: var(--gold);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .action-card code {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 6px;
+  }
+  .action-card a {
+    color: var(--moss);
+    font-weight: 600;
+  }
+
+  footer.signoff {
+    border-top: 1px solid var(--line);
+    margin-top: 8px;
+    padding-top: 24px;
+    color: var(--ink-dim);
+    font-size: 15px;
+  }
+  footer.signoff .sign {
+    margin-top: 4px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+  }
+</style>
+</head>
+<body>
+
+<div class="tape" aria-hidden="true">
+  <div class="tape-track">
+    <span class="tape-item"><b>&#9650;</b> NEW LOOK</span>
+    <span class="tape-item"><b>&#9650;</b> ANALYZE, FASTER</span>
+    <span class="tape-item"><b>&#9650;</b> BRING YOUR OWN KEY</span>
+    <span class="tape-item"><b>&#9650;</b> NEW LOOK</span>
+    <span class="tape-item"><b>&#9650;</b> ANALYZE, FASTER</span>
+    <span class="tape-item"><b>&#9650;</b> BRING YOUR OWN KEY</span>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <svg class="mark" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="housing" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#232F29"/>
+          <stop offset="100%" stop-color="#131A16"/>
+        </linearGradient>
+        <radialGradient id="red" cx="38%" cy="32%" r="70%">
+          <stop offset="0%" stop-color="#FF9B7A"/>
+          <stop offset="35%" stop-color="#E2523A"/>
+          <stop offset="100%" stop-color="#9C3320"/>
+        </radialGradient>
+        <radialGradient id="amber" cx="38%" cy="32%" r="70%">
+          <stop offset="0%" stop-color="#FFE3A0"/>
+          <stop offset="35%" stop-color="#E8A93A"/>
+          <stop offset="100%" stop-color="#95691C"/>
+        </radialGradient>
+        <radialGradient id="green" cx="38%" cy="32%" r="70%">
+          <stop offset="0%" stop-color="#A9F0C9"/>
+          <stop offset="35%" stop-color="#3FA372"/>
+          <stop offset="100%" stop-color="#215C40"/>
+        </radialGradient>
+        <filter id="glow" x="-100%" y="-100%" width="300%" height="300%">
+          <feGaussianBlur stdDeviation="6" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <rect x="24" y="26" width="152" height="148" rx="26" fill="url(#housing)" stroke="#0A0F0C" stroke-width="2"/>
+      <g filter="url(#glow)"><circle cx="100" cy="65" r="20" fill="#E2523A" opacity="0.45"/><circle cx="100" cy="65" r="17" fill="url(#red)"/></g>
+      <g filter="url(#glow)"><circle cx="100" cy="100" r="20" fill="#E8A93A" opacity="0.45"/><circle cx="100" cy="100" r="17" fill="url(#amber)"/></g>
+      <g filter="url(#glow)"><circle cx="100" cy="135" r="20" fill="#3FA372" opacity="0.45"/><circle cx="100" cy="135" r="17" fill="url(#green)"/></g>
+      <ellipse cx="93" cy="58" rx="5.5" ry="3.5" fill="#fff" opacity="0.55" transform="rotate(-25 93 58)"/>
+      <ellipse cx="93" cy="93" rx="5.5" ry="3.5" fill="#fff" opacity="0.55" transform="rotate(-25 93 93)"/>
+      <ellipse cx="93" cy="128" rx="5.5" ry="3.5" fill="#fff" opacity="0.55" transform="rotate(-25 93 128)"/>
+    </svg>
+    <div class="id">
+      <div class="eyebrow">Signal</div>
+      <h1>Tape</h1>
+    </div>
+    <div class="release-tag">Release notes<br>Sep 2026</div>
+  </header>
+
+  <p class="intro">A few things changed since you last opened the app &mdash; a redesign, a faster Analyze tab, and one thing worth doing if you've hit a wall this week.</p>
+
+  <section class="entry">
+    <div class="entry-eyebrow">Design</div>
+    <h2>A new look, top to bottom</h2>
+    <p>Tape moved off the dark, generic dashboard look and onto its own identity: a warm paper background, ink-black type, and a live scrolling ticker strip up top &mdash; the same ribbon this whole redesign is named after. Prices are now set in a proper tabular monospace, so columns of numbers actually line up.</p>
+    <p>The app icon is new too: a traffic-light mark, in the same red/amber/green language the verdict beacon already used inside the app &mdash; now it's on the outside as well.</p>
+  </section>
+
+  <section class="entry">
+    <div class="entry-eyebrow">Performance</div>
+    <h2>Analyze doesn't leave you staring at a spinner anymore</h2>
+    <p>Tapping Analyze used to mean one long wait for everything at once &mdash; price, chart, and the AI's verdict, all held behind a single 15&ndash;60 second call. It's now two stages: the price, chart, and stats appear almost immediately, and the verdict, entry/stop/target, and sentiment read fill in a few seconds after &mdash; pulled apart because they're genuinely different jobs, not because either got faster to compute.</p>
+    <div class="speed-compare">
+      <div class="speed-figure">
+        <span class="speed-label">Before</span>
+        <span class="speed-value before">15&ndash;60s blank</span>
+      </div>
+      <span class="speed-arrow">&rarr;</span>
+      <div class="speed-figure">
+        <span class="speed-label">After</span>
+        <span class="speed-value after">~2s to first paint</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="entry">
+    <div class="entry-eyebrow">Settings</div>
+    <h2>Hitting "quota exceeded" on Analyze?</h2>
+    <p>Analyze runs on Google Gemini, and everyone testing has been sharing one free key &mdash; enough of us using it at once burns through its daily free limit, which is what that error means. It's not a bug in the app; it's the pool running out.</p>
+    <div class="action-card">
+      <p style="margin:0;">Bring your own free key and this stops affecting you &mdash; your Analyze calls run on your own quota instead of the shared one.</p>
+      <ol class="steps">
+        <li><span class="step-text">Open Tape, tap the <code>&#9881;</code> gear icon (top right, any tab)</span></li>
+        <li><span class="step-text">Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">aistudio.google.com/apikey</a> &mdash; no card needed, about 2 minutes</span></li>
+        <li><span class="step-text">Paste it in and tap <code>Save key</code> &mdash; it stays on your device only</span></li>
+      </ol>
+    </div>
+  </section>
+
+  <footer class="signoff">
+    <p style="margin:0;">Nothing else needed on your end &mdash; just reopen or refresh the app to get everything above. Thanks for testing; flag anything that looks off.</p>
+    <div class="sign">&mdash; Sree</div>
+  </footer>
+
+</div>
+</body>
+</html>
+`;
+
+// ---------------------------------------------------------------------------
 // HTTP routing
 // ---------------------------------------------------------------------------
 
@@ -1127,6 +1500,9 @@ export default {
 
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers });
+    }
+    if (request.method === "GET" && url.pathname === "/release-notes") {
+      return new Response(RELEASE_NOTES_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
     }
     if (request.method !== "POST") {
       return errorResponse(405, "Use POST.", headers);
