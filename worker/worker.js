@@ -441,6 +441,55 @@ function runBacktest(ticker, points, amount, recurringAmount) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Deterministic technicals — everything here is a plain calculation off the
+// price series, not an LLM's job. Computed once in gatherMarketData() so the
+// fast /technicals endpoint and /analyze agree on the same numbers.
+// ---------------------------------------------------------------------------
+
+function fmtUsd(n) {
+  return n == null || Number.isNaN(n) ? null : `$${n.toFixed(2)}`;
+}
+
+function fmtPct(n, digits = 1) {
+  return n == null || Number.isNaN(n) ? null : `${n >= 0 ? "+" : ""}${n.toFixed(digits)}%`;
+}
+
+function formatAsOfLabel(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return "as of latest close";
+  return `as of ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })} close`;
+}
+
+function computeStats(points, fiftyTwoWeekHigh, fiftyTwoWeekLow, price) {
+  const first = points[0];
+  const last = points[points.length - 1];
+  const oneYearReturn = first?.close ? ((last.close - first.close) / first.close) * 100 : null;
+
+  // Same recent window as the chart itself, so "big move days" matches what's on screen.
+  const recent = points.slice(-60);
+  const dailyChanges = [];
+  for (let i = 1; i < recent.length; i++) {
+    const prevClose = recent[i - 1].close;
+    if (prevClose) dailyChanges.push(((recent[i].close - prevClose) / prevClose) * 100);
+  }
+  const avgAbsChange = dailyChanges.length
+    ? dailyChanges.reduce((sum, v) => sum + Math.abs(v), 0) / dailyChanges.length
+    : null;
+  const volLabel = avgAbsChange == null ? null : avgAbsChange < 1 ? "Low" : avgAbsChange < 2.5 ? "Moderate" : "High";
+  const bigMoveCount = dailyChanges.filter((v) => Math.abs(v) > 5).length;
+
+  return {
+    high52: fmtUsd(fiftyTwoWeekHigh),
+    low52: fmtUsd(fiftyTwoWeekLow),
+    pctFromHigh: fiftyTwoWeekHigh ? fmtPct(((price - fiftyTwoWeekHigh) / fiftyTwoWeekHigh) * 100) : null,
+    pctFromLow: fiftyTwoWeekLow ? fmtPct(((price - fiftyTwoWeekLow) / fiftyTwoWeekLow) * 100) : null,
+    oneYearReturn: fmtPct(oneYearReturn),
+    volatility: avgAbsChange != null ? `${volLabel} (~${avgAbsChange.toFixed(1)}% daily range)` : null,
+    bigMoveDays: `${bigMoveCount} day${bigMoveCount === 1 ? "" : "s"} (>5% shift)`,
+  };
+}
+
 async function gatherMarketData(ticker) {
   const [daily, monthly, info] = await Promise.all([
     fetchYahooChartFull(ticker, "1y", "1d"),
@@ -457,6 +506,8 @@ async function gatherMarketData(ticker) {
   const changePercent = prev ? ((latest.close - prev.close) / prev.close) * 100 : null;
   const rsiSeries = computeRSI(daily.points, 14);
   const macdSeries = computeMACD(daily.points, 12, 26, 9);
+  const fiftyTwoWeekHigh = daily.meta?.fiftyTwoWeekHigh ?? null;
+  const fiftyTwoWeekLow = daily.meta?.fiftyTwoWeekLow ?? null;
 
   return {
     ticker,
@@ -467,15 +518,38 @@ async function gatherMarketData(ticker) {
       price: latest.close,
       changePercent,
       asOf: latest.date,
-      fiftyTwoWeekHigh: daily.meta?.fiftyTwoWeekHigh ?? null,
-      fiftyTwoWeekLow: daily.meta?.fiftyTwoWeekLow ?? null,
+      fiftyTwoWeekHigh,
+      fiftyTwoWeekLow,
       previousClose: daily.meta?.chartPreviousClose ?? null,
     },
+    stats: computeStats(daily.points, fiftyTwoWeekHigh, fiftyTwoWeekLow, latest.close),
     dailyPriceHistory: daily.points.slice(-60),
     rsi14: rsiSeries ? rsiSeries.slice(-5) : null,
     macd: macdSeries ? macdSeries.slice(-5) : null,
     monthlyPriceHistory: monthly ? monthly.points.slice(-13) : null,
     recentNews: info.news,
+  };
+}
+
+// The fast, deterministic half of the dashboard — everything Gemini would
+// otherwise have to re-derive and re-emit itself. Served by /technicals so
+// the frontend can paint price/chart/stats in ~1-3s while /analyze's Gemini
+// call (15-60s) runs in parallel for the verdict and narrative.
+function formatTechnicalsResponse(marketData) {
+  const { quote } = marketData;
+  const asOf = formatAsOfLabel(quote.asOf);
+  return {
+    ticker: marketData.ticker,
+    companyName: marketData.companyName,
+    sector: marketData.sector,
+    industry: marketData.industry,
+    price: fmtUsd(quote.price),
+    changePercent: quote.changePercent != null ? `${fmtPct(quote.changePercent, 2)} today` : "—",
+    asOf,
+    stats: marketData.stats,
+    chartPoints: marketData.dailyPriceHistory.map((p) => ({ date: p.date, price: p.close })),
+    chartApproximate: marketData.dailyPriceHistory.length < 8,
+    provenance: `Live data via Yahoo Finance, ${asOf}`,
   };
 }
 
@@ -1066,6 +1140,22 @@ export default {
       payload = await request.json();
     } catch {
       return errorResponse(400, "Invalid request body.", headers);
+    }
+
+    if (path === "/technicals") {
+      const ticker = String(payload.ticker || "").trim().toUpperCase();
+      if (!isValidTicker(ticker)) {
+        return errorResponse(400, "Enter a valid ticker symbol, e.g. NVDA.", headers);
+      }
+      try {
+        const marketData = await gatherMarketData(ticker);
+        if (marketData.error) {
+          return errorResponse(404, marketData.error, headers);
+        }
+        return jsonResponse(200, formatTechnicalsResponse(marketData), headers);
+      } catch (err) {
+        return errorResponse(500, err.message || "Something went wrong.", headers);
+      }
     }
 
     if (path === "/analyze") {

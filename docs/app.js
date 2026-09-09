@@ -31,6 +31,127 @@
     return { favourable: "FAVOURABLE", neutral: "NEUTRAL", unfavourable: "UNFAVOURABLE" }[verdict] || "NEUTRAL";
   }
 
+  // Shared by the fast /technicals preview and the full /analyze render, so
+  // both draw the exact same chart instead of two slightly different ones.
+  function buildPriceChart(canvas, points, up) {
+    const colorRgb = up ? "47,110,82" : "162,61,38";
+    return new Chart(canvas, {
+      type: "line",
+      data: {
+        labels: points.map((p) => p.date),
+        datasets: [{
+          data: points.map((p) => p.price),
+          borderColor: up ? "#2F6E52" : "#A23D26",
+          backgroundColor: (c) => {
+            const { chartArea, ctx: cv } = c.chart;
+            if (!chartArea) return null;
+            const gradient = cv.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+            gradient.addColorStop(0, `rgba(${colorRgb},0.3)`);
+            gradient.addColorStop(1, `rgba(${colorRgb},0)`);
+            return gradient;
+          },
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.3,
+          fill: true,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: true } },
+        scales: {
+          x: {
+            display: true,
+            grid: { display: false },
+            ticks: {
+              color: "#8B9187",
+              maxTicksLimit: 5,
+              autoSkip: true,
+              font: { size: 10 },
+              callback: function (value) {
+                const raw = this.getLabelForValue(value);
+                const dt = new Date(`${raw}T00:00:00Z`);
+                return Number.isNaN(dt.getTime())
+                  ? raw
+                  : dt.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+              },
+            },
+          },
+          y: { display: false },
+        },
+      },
+    });
+  }
+
+  function statsStripHtml(stats) {
+    stats = stats || {};
+    return [
+      ["52-wk high", stats.high52],
+      ["52-wk low", stats.low52],
+      ["% from high", stats.pctFromHigh],
+      ["% from low", stats.pctFromLow],
+      ["~1-yr return", stats.oneYearReturn],
+      ["Volatility", stats.volatility],
+      ["Big-move days", stats.bigMoveDays],
+    ].filter(([, v]) => v != null && v !== "")
+      .map(([label, value]) => `
+        <div class="stat">
+          <div class="s-label">${esc(label)}</div>
+          <div class="s-value">${esc(value)}</div>
+        </div>
+      `).join("");
+  }
+
+  // Painted immediately from /technicals (deterministic, ~1-3s) while
+  // /analyze's Gemini call (15-60s) runs in parallel for the verdict and
+  // narrative — see analyze() below.
+  function renderFastTechnicals(t) {
+    const up = !String(t.changePercent || "").trim().startsWith("-");
+    const badgeText = String(t.ticker || "").length > 4 ? String(t.ticker).slice(0, 4) : t.ticker;
+
+    $dashboard.innerHTML = `
+      <div class="card">
+        <div class="ticker-header">
+          <div class="ticker-id">
+            <span class="chart-badge ${up ? "up" : "down"}">${esc(badgeText)}</span>
+            <div>
+              <div class="symbol">${esc(t.ticker)}</div>
+              <div class="name">${esc(t.companyName)}</div>
+            </div>
+          </div>
+          <div class="price">
+            <div class="p">${esc(t.price)}</div>
+            <div class="chg">${esc(t.changePercent)}</div>
+          </div>
+        </div>
+        <div class="as-of">${esc(t.asOf)}</div>
+      </div>
+
+      <div class="card">
+        <div class="skeleton-line" style="width:45%"></div>
+        <div class="skeleton-line" style="width:92%"></div>
+        <div class="skeleton-line" style="width:78%"></div>
+      </div>
+
+      <div class="card">
+        <div class="stats-strip">${statsStripHtml(t.stats)}</div>
+        <div class="chart-wrap">
+          <canvas id="priceChart" role="img" aria-label="52-week price line chart for ${esc(t.ticker)}"></canvas>
+        </div>
+        <div class="chart-caption">52-week trend${t.chartApproximate ? " (approximate — sparse data)" : ""}</div>
+      </div>
+    `;
+    $dashboard.classList.add("visible");
+
+    if (chartInstance) chartInstance.destroy();
+    const points = Array.isArray(t.chartPoints) ? t.chartPoints : [];
+    const ctx = document.getElementById("priceChart");
+    if (ctx && points.length) {
+      chartInstance = buildPriceChart(ctx, points, up);
+    }
+  }
+
   function renderDashboard(d) {
     const lit = verdictBeaconClasses(d.verdict);
     const entryProminent = d.verdict === "favourable";
@@ -56,26 +177,9 @@
       ${d.riskReward ? `<div class="rr">Reward-to-risk: ${esc(d.riskReward)}</div>` : ""}
     `;
 
-    const stats = d.stats || {};
     const statsHtml = `
       <div class="card">
-        <div class="stats-strip">
-          ${[
-            ["52-wk high", stats.high52],
-            ["52-wk low", stats.low52],
-            ["% from high", stats.pctFromHigh],
-            ["% from low", stats.pctFromLow],
-            ["~1-yr return", stats.oneYearReturn],
-            ["Volatility", stats.volatility],
-            ["Big-move days", stats.bigMoveDays],
-          ].filter(([, v]) => v != null && v !== "")
-            .map(([label, value]) => `
-              <div class="stat">
-                <div class="s-label">${esc(label)}</div>
-                <div class="s-value">${esc(value)}</div>
-              </div>
-            `).join("")}
-        </div>
+        <div class="stats-strip">${statsStripHtml(d.stats)}</div>
         <div class="chart-wrap">
           <canvas id="priceChart" role="img" aria-label="52-week price line chart for ${esc(d.ticker)}"></canvas>
         </div>
@@ -179,54 +283,7 @@
     const points = Array.isArray(d.chartPoints) ? d.chartPoints : [];
     const ctx = document.getElementById("priceChart");
     if (ctx && points.length) {
-      const colorRgb = up ? "47,110,82" : "162,61,38";
-      chartInstance = new Chart(ctx, {
-        type: "line",
-        data: {
-          labels: points.map((p) => p.date),
-          datasets: [{
-            data: points.map((p) => p.price),
-            borderColor: up ? "#2F6E52" : "#A23D26",
-            backgroundColor: (c) => {
-              const { chartArea, ctx: cv } = c.chart;
-              if (!chartArea) return null;
-              const gradient = cv.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
-              gradient.addColorStop(0, `rgba(${colorRgb},0.3)`);
-              gradient.addColorStop(1, `rgba(${colorRgb},0)`);
-              return gradient;
-            },
-            borderWidth: 2,
-            pointRadius: 0,
-            tension: 0.3,
-            fill: true,
-          }],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false }, tooltip: { enabled: true } },
-          scales: {
-            x: {
-              display: true,
-              grid: { display: false },
-              ticks: {
-                color: "#8B9187",
-                maxTicksLimit: 5,
-                autoSkip: true,
-                font: { size: 10 },
-                callback: function (value) {
-                  const raw = this.getLabelForValue(value);
-                  const dt = new Date(`${raw}T00:00:00Z`);
-                  return Number.isNaN(dt.getTime())
-                    ? raw
-                    : dt.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
-                },
-              },
-            },
-            y: { display: false },
-          },
-        },
-      });
+      chartInstance = buildPriceChart(ctx, points, up);
     }
 
     const $chartWrap = document.querySelector(".chart-wrap");
@@ -284,23 +341,38 @@
 
     $btn.disabled = true;
     $dashboard.classList.remove("visible");
-    setStatus(`<span class="spinner"></span>Pulling technicals, history, and sentiment for ${esc(ticker)}… this can take 15–60s.`);
+    setStatus(`<span class="spinner"></span>Pulling technicals for ${esc(ticker)}…`);
+
+    const headers = {
+      "content-type": "application/json",
+      ...(cfg.APP_KEY ? { "X-App-Key": cfg.APP_KEY } : {}),
+    };
+
+    async function postJson(path, body) {
+      const res = await fetch(`${cfg.API_URL}${path}`, { method: "POST", headers, body: JSON.stringify(body) });
+      const data = await res.json();
+      return { ok: res.ok, status: res.status, data };
+    }
+
+    // Fired together: /technicals is deterministic and fast (~1-3s) so it
+    // paints price/chart/stats immediately, while /analyze's Gemini call
+    // (15-60s) runs in parallel for the verdict and narrative. If /technicals
+    // fails or is slower for some reason, /analyze's own full render still
+    // covers everything — this is a progressive-paint layer, not a dependency.
+    let fullRendered = false;
+    postJson("/technicals", { ticker }).then(({ ok, data }) => {
+      if (fullRendered || !ok) return;
+      renderFastTechnicals(data);
+      setStatus(`<span class="spinner"></span>Reading the setup — verdict, entry/stop/target, and sentiment for ${esc(ticker)}… this can take 15–60s.`);
+    }).catch(() => {});
 
     try {
       const userKey = window.getUserGeminiKey ? window.getUserGeminiKey() : null;
-      const res = await fetch(`${cfg.API_URL}/analyze`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(cfg.APP_KEY ? { "X-App-Key": cfg.APP_KEY } : {}),
-        },
-        body: JSON.stringify({ ticker, ...(userKey ? { geminiKey: userKey } : {}) }),
-      });
+      const { ok, status, data } = await postJson("/analyze", { ticker, ...(userKey ? { geminiKey: userKey } : {}) });
+      fullRendered = true;
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        setStatus(esc(data.error || `Request failed (${res.status}).`), true);
+      if (!ok) {
+        setStatus(esc(data.error || `Request failed (${status}).`), true);
         return;
       }
 
